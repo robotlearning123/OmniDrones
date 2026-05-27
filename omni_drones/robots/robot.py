@@ -60,8 +60,6 @@ class RobotBase(abc.ABC):
     def __init__(self, name: str, cfg: RobotCfg = None, is_articulation=True) -> None:
         if name is None:
             name = self.__class__.__name__
-        if name in RobotBase._robots:
-            raise RuntimeError
         RobotBase._robots[name] = self
         if cfg is None:
             cfg = self.cfg_cls()
