@@ -40,8 +40,6 @@ from torchrl.data import (
 )
 from pxr import UsdShade, PhysxSchema
 
-from isaaclab.sensors import ContactSensorCfg, ContactSensor
-
 class Pinball(IsaacEnv):
     """
     This is an advanced control task where the drone is tasked with
@@ -88,15 +86,10 @@ class Pinball(IsaacEnv):
         self.ball = RigidPrimView(
             "/World/envs/env_*/ball",
             reset_xform_properties=False,
-            track_contact_forces=False,
+            track_contact_forces=True,
             shape=(-1, 1)
         )
         self.ball.initialize()
-        contact_sensor_cfg = ContactSensorCfg(
-            prim_path="/World/envs/env_.*/ball",
-        )
-        self.contact_sensor: ContactSensor = contact_sensor_cfg.class_type(contact_sensor_cfg)
-        self.contact_sensor._initialize_impl()
 
         self.init_ball_pos_dist = D.Uniform(
             torch.tensor([-1., -1., 2.5], device=self.device),
@@ -219,7 +212,7 @@ class Pinball(IsaacEnv):
         self.effort = self.drone.apply_action(actions)
 
     def _post_sim_step(self, tensordict: TensorDictBase):
-        self.contact_sensor.update(self.dt)
+        pass
 
     def _compute_state_and_obs(self):
         self.drone_state = self.drone.get_state()
@@ -247,9 +240,7 @@ class Pinball(IsaacEnv):
 
     def _compute_reward_and_done(self):
 
-        # score = self.ball.get_net_contact_forces().any(-1).float()
-        # self.drone.base_link.get_net_contact_forces().any(-1).float()
-        score = self.contact_sensor.data.net_forces_w.any(-1).float()
+        score = self.ball.get_net_contact_forces().any(-1).float()
 
         reward_pos = 1 / (1 + torch.norm(self.rpos[..., :2], dim=-1))
         reward_height = (self.ball_pos[..., 2] - self.drone.pos[..., 2].clip(1.0)).clip(0., 2.)

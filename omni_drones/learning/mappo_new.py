@@ -107,9 +107,14 @@ class EnsembleModule(_EnsembleModule):
 
         params_td = TensorDict.from_module(module).expand(num_copies).to_tensordict()
         self.module = module
-        self.vmapped_forward = vmap(self.module, (1, 0), 1)
+        # vmap over input dim 1 (agents) and params dim 0 (copies), output dim 1
+        self.vmapped_forward = torch.vmap(self._func_module_call, (1, 0), 1)
         self.reset_parameters_recursive(params_td)
         self.params_td = TensorDictParams(params_td)
+
+    def _func_module_call(self, input, params):
+        with params.to_module(self.module):
+            return self.module(input)
 
     def forward(self, tensordict: TensorDict):
         tensordict = tensordict.select(*self.in_keys)
@@ -140,6 +145,12 @@ class MAPPO:
         self.clip_param = 0.1
         self.critic_loss_fn = nn.HuberLoss(delta=10)
         self.gae = GAE(0.99, 0.95)
+
+        # torchrl 0.12+ returns Composite; extract the inner action spec
+        if isinstance(action_spec, Composite) and ("agents", "action") in action_spec.keys(True, True):
+            action_spec = action_spec["agents", "action"]
+        elif isinstance(action_spec, Composite) and "action" in action_spec.keys():
+            action_spec = action_spec["action"]
 
         if not action_spec.ndim > 2:
             raise ValueError("Please use PPOPolicy for single-agent environments.")
@@ -227,7 +238,7 @@ class MAPPO:
         entropy = dist.entropy().mean()
 
         adv = tensordict["adv"]
-        ratio = torch.exp(log_probs - tensordict["sample_log_prob"]).unsqueeze(-1)
+        ratio = torch.exp(log_probs - tensordict[("agents", "action_log_prob")]).unsqueeze(-1)
         surr1 = adv * ratio
         surr2 = adv * ratio.clamp(1.-self.clip_param, 1.+self.clip_param)
         policy_loss = - torch.mean(torch.min(surr1, surr2)) * self.action_dim

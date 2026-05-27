@@ -32,6 +32,7 @@ import carb
 import numpy as np
 from isaacsim.core.cloner import GridCloner
 from isaacsim.core.api.simulation_context import SimulationContext
+from isaacsim.core.simulation_manager import SimulationManager
 from isaacsim.core.utils import prims as prim_utils, stage as stage_utils
 from isaacsim.core.utils.extensions import enable_extension
 from isaacsim.core.utils.viewports import set_camera_view
@@ -119,6 +120,41 @@ class IsaacEnv(EnvBase):
             physics_prim_path="/physicsScene",
             device="cuda:0",
         )
+
+        # Create a minimal isaaclab SimulationContext shim so that isaaclab
+        # components (terrains, sensors, lights) can access SimulationContext.instance()
+        try:
+            from isaaclab.sim import simulation_context as isaaclab_sim_ctx
+            if isaaclab_sim_ctx.SimulationContext.instance() is None:
+                import types
+                # Use the actual PhysxManager class for physics_manager so that
+                # get_physics_sim_view() works after sim.reset()
+                try:
+                    from isaaclab_physx.physics.physx_manager import PhysxManager
+                    _physx_mgr = PhysxManager
+                except Exception:
+                    _physx_mgr = types.SimpleNamespace(
+                        __name__="PhysxManager",
+                        register_callback=lambda *a, **kw: types.SimpleNamespace(deregister=lambda: None),
+                        safe_callback_invoke=lambda *a, **kw: None,
+                        get_scene_data_backend=lambda: None,
+                        get_physics_sim_view=lambda: None,
+                    )
+                _shim = types.SimpleNamespace(
+                    device=self.sim.device,
+                    backend="torch",
+                    physics_manager=_physx_mgr,
+                    get_physics_dt=lambda: self.sim.get_physics_dt(),
+                    vis_marker_registry=types.SimpleNamespace(clear_debug_vis_callback=lambda *a: None),
+                    stage=stage_utils.get_current_stage(),
+                )
+                isaaclab_sim_ctx.SimulationContext._instance = _shim
+                # Also set the thread-local stage so get_current_stage() works
+                from isaaclab.sim.utils import stage as isaaclab_stage_utils
+                isaaclab_stage_utils._context.stage = stage_utils.get_current_stage()
+        except Exception:
+            pass  # isaaclab not available; skip shim
+
         self._create_viewport_render_product()
         self.dt = self.sim.get_physics_dt()
         # add flag for checking closing status
@@ -168,6 +204,18 @@ class IsaacEnv(EnvBase):
             global_paths=global_prim_paths,
         )
         self.sim.reset()
+
+        # Sync the PhysX simulation view with isaaclab's PhysxManager so that
+        # isaaclab sensors (RayCaster, ContactSensor) can access it.
+        try:
+            from isaaclab_physx.physics.physx_manager import PhysxManager
+            _sim_view = SimulationManager.get_physics_sim_view()
+            if _sim_view is not None and PhysxManager._view is None:
+                PhysxManager._view = _sim_view
+                PhysxManager._view_created = True
+        except Exception:
+            pass
+
         self.debug_draw = DebugDraw()
 
         self._tensordict = TensorDict(

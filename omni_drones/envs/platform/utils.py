@@ -175,7 +175,7 @@ class OveractuatedPlatform(RobotBase):
             ], dim=-1) * self.arm_lengths.unsqueeze(1)
 
             drone_rotations = torch.tensor(
-                Rotation.from_euler("z", -self.arm_angles)
+                Rotation.from_euler("z", -self.arm_angles.unsqueeze(-1))
                 .as_quat()[:, [3, 0, 1, 2]]
             )
 

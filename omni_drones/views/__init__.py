@@ -439,6 +439,7 @@ class RigidPrimView(_RigidPrimView):
         shape: Tuple[int, ...] = (-1,),
     ) -> None:
         self.shape = shape
+        self._physics_sim_view = None
         super().__init__(
             prim_paths_expr,
             name,
@@ -460,6 +461,11 @@ class RigidPrimView(_RigidPrimView):
 
     @require_sim_initialized
     def initialize(self, physics_sim_view: omni.physics.tensors.SimulationView = None):
+        if physics_sim_view is None:
+            physics_sim_view = SimulationManager.get_physics_sim_view()
+            if physics_sim_view is None:
+                raise RuntimeError("Physics simulation view not available. Call sim.reset() first.")
+        self._physics_sim_view = physics_sim_view
         super().initialize(physics_sim_view)
         self.shape = torch.arange(self.count).reshape(self.shape).shape
         return self

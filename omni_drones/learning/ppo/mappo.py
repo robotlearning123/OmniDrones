@@ -90,6 +90,11 @@ class MAPPOPolicy:
         self.entropy_coef = 0.001
         self.clip_param = 0.1
         self.critic_loss_fn = nn.HuberLoss(delta=10)
+        # torchrl 0.12+ returns Composite; extract the inner action spec
+        if isinstance(action_spec, Composite) and ("agents", "action") in action_spec.keys(True, True):
+            action_spec = action_spec["agents", "action"]
+        elif isinstance(action_spec, Composite) and "action" in action_spec.keys():
+            action_spec = action_spec["action"]
         self.n_agents, self.action_dim = action_spec.shape[-2:]
         self.gae = GAE(0.99, 0.95)
 
@@ -133,6 +138,11 @@ class MAPPOPolicy:
 
         self.actor_opt = torch.optim.Adam(self.actor.parameters(), lr=5e-4)
         self.critic_opt = torch.optim.Adam(self.critic.parameters(), lr=5e-4)
+        # torchrl 0.12+ returns Composite; extract the inner reward spec
+        if isinstance(reward_spec, Composite) and ("agents", "reward") in reward_spec.keys(True, True):
+            reward_spec = reward_spec["agents", "reward"]
+        elif isinstance(reward_spec, Composite) and "reward" in reward_spec.keys():
+            reward_spec = reward_spec["reward"]
         self.value_norm = ValueNorm1(reward_spec.shape[-2:]).to(self.device)
 
     def __call__(self, tensordict: TensorDict):
@@ -181,7 +191,7 @@ class MAPPOPolicy:
         entropy = dist.entropy()
 
         adv = tensordict["adv"]
-        ratio = torch.exp(log_probs - tensordict["sample_log_prob"]).unsqueeze(-1)
+        ratio = torch.exp(log_probs - tensordict[("agents", "action_log_prob")]).unsqueeze(-1)
         surr1 = adv * ratio
         surr2 = adv * ratio.clamp(1.-self.clip_param, 1.+self.clip_param)
         policy_loss = - torch.mean(torch.min(surr1, surr2)) * self.action_dim

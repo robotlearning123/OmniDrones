@@ -374,7 +374,7 @@ class PayloadFlyThrough(IsaacEnv):
         if self.reset_on_collision:
             terminated |= collision
 
-        self.stats["success"].bitwise_or_(self.payload_pos_error < 0.2)
+        self.stats["success"].bitwise_or_((self.payload_pos_error < 0.2).squeeze(-1))
         self.stats["return"].add_(reward)
         self.stats["episode_len"][:] = self.progress_buf.unsqueeze(1)
 

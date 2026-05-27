@@ -277,8 +277,8 @@ class FlyThrough(IsaacEnv):
             self.gate_drone_rpos,
         ]
         if self.time_encoding:
-            t = (self.progress_buf / self.max_episode_length).unsqueeze(-1)
-            obs.append(t.expand(-1, self.time_encoding_dim).unsqueeze(1))
+            t = (self.progress_buf / self.max_episode_length).unsqueeze(-1).unsqueeze(1)
+            obs.append(t.expand(-1, 1, self.time_encoding_dim))
         obs = torch.cat(obs, dim=-1)
 
         self.pos_error = torch.norm(self.target_drone_rpos, dim=-1)
@@ -355,7 +355,7 @@ class FlyThrough(IsaacEnv):
         if self.reset_on_collision:
             terminated |= collision
 
-        self.stats["success"].bitwise_or_(distance_to_target < 0.2)
+        self.stats["success"].bitwise_or_((distance_to_target < 0.2).squeeze(-1))
         self.stats["return"].add_(reward)
         self.stats["episode_len"][:] = self.progress_buf.unsqueeze(1)
 

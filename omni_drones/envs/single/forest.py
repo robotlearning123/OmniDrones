@@ -130,8 +130,7 @@ class Forest(IsaacEnv):
 
         drone_prim = self.drone.spawn(translations=[(0.0, 0.0, 2.)])[0]
 
-        from isaaclab.sim import sim_utils
-        from isaaclab.assets import AssetBaseCfg
+        import isaaclab.sim as sim_utils
         from isaaclab.sensors import RayCaster, RayCasterCfg, patterns
         from isaaclab.terrains import (
             TerrainImporterCfg,
@@ -139,7 +138,8 @@ class Forest(IsaacEnv):
             TerrainGeneratorCfg,
             HfDiscreteObstaclesTerrainCfg,
         )
-        # from omni.isaac.lab.utils.assets import NVIDIA_NUCLEUS_DIR
+
+        from isaaclab.assets import AssetBaseCfg
 
         light = AssetBaseCfg(
             prim_path="/World/light",
@@ -199,7 +199,7 @@ class Forest(IsaacEnv):
         ray_caster_cfg = RayCasterCfg(
             prim_path="/World/envs/env_.*/Hummingbird_0/base_link",
             offset=RayCasterCfg.OffsetCfg(pos=(0.0, 0.0, 0.0)),
-            attach_yaw_only=False,
+            ray_alignment="base",
             pattern_cfg=patterns.BpearlPatternCfg(
                 vertical_ray_angles=torch.linspace(*self.lidar_vfov, 4)
             ),
