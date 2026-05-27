@@ -28,8 +28,8 @@ import torch
 import torch.distributions as D
 import yaml
 from torch.func import vmap
-from tensordict.nn import make_functional
-from torchrl.data import BoundedTensorSpec, CompositeSpec, UnboundedContinuousTensorSpec
+from tensordict import TensorDict
+from torchrl.data import Bounded, Composite, UnboundedContinuous
 from tensordict import TensorDict
 
 from omni_drones.views import RigidPrimView
@@ -63,25 +63,25 @@ class MultirotorBase(RobotBase):
             self.params = yaml.safe_load(f)
         self.num_rotors = self.params["rotor_configuration"]["num_rotors"]
 
-        self.intrinsics_spec = CompositeSpec({
-            "mass": UnboundedContinuousTensorSpec(1),
-            "inertia": UnboundedContinuousTensorSpec(3),
-            "com": UnboundedContinuousTensorSpec(3),
-            "KF": UnboundedContinuousTensorSpec(self.num_rotors),
-            "KM": UnboundedContinuousTensorSpec(self.num_rotors),
-            "tau_up": UnboundedContinuousTensorSpec(self.num_rotors),
-            "tau_down": UnboundedContinuousTensorSpec(self.num_rotors),
-            "drag_coef": UnboundedContinuousTensorSpec(1),
+        self.intrinsics_spec = Composite({
+            "mass": UnboundedContinuous(1),
+            "inertia": UnboundedContinuous(3),
+            "com": UnboundedContinuous(3),
+            "KF": UnboundedContinuous(self.num_rotors),
+            "KM": UnboundedContinuous(self.num_rotors),
+            "tau_up": UnboundedContinuous(self.num_rotors),
+            "tau_down": UnboundedContinuous(self.num_rotors),
+            "drag_coef": UnboundedContinuous(1),
         }).to(self.device)
 
         state_dim = 19 + self.num_rotors
-        self.state_spec = UnboundedContinuousTensorSpec(state_dim, device=self.device)
+        self.state_spec = UnboundedContinuous(state_dim, device=self.device)
         self.randomization = defaultdict(dict)
 
     @property
     def action_spec(self):
         if not hasattr(self, "_action_spec"):
-            self._action_spec = BoundedTensorSpec(-1, 1, self.num_rotors, device=self.device)
+            self._action_spec = Bounded(-1, 1, self.num_rotors, device=self.device)
         return self._action_spec
 
     def initialize(
@@ -127,7 +127,7 @@ class MultirotorBase(RobotBase):
         rotor_config = self.params["rotor_configuration"]
         self.rotors = RotorGroup(rotor_config, dt=self.dt).to(self.device)
 
-        rotor_params = make_functional(self.rotors)
+        rotor_params = TensorDict.from_module(self.rotors)
         self.KF_0 = rotor_params["KF"].clone()
         self.KM_0 = rotor_params["KM"].clone()
         self.MAX_ROT_VEL = (

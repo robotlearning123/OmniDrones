@@ -14,7 +14,7 @@ from tqdm import tqdm
 from omegaconf import OmegaConf
 
 from omni_drones import init_simulation_app
-from torchrl.data import CompositeSpec
+from torchrl.data import Composite
 from torchrl.envs.utils import set_exploration_type, ExplorationType
 from omni_drones.utils.torchrl import SyncDataCollector
 from omni_drones.utils.torchrl.transforms import (
@@ -49,7 +49,7 @@ def main(cfg):
 
     transforms = [InitTracker()]
 
-    # a CompositeSpec is by default processed by a entity-based encoder
+    # a Composite is by default processed by a entity-based encoder
     # ravel it to use a MLP encoder instead
     if cfg.task.get("ravel_obs", False):
         transform = ravel_composite(base_env.observation_spec, ("agents", "observation"))

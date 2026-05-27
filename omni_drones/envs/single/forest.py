@@ -30,9 +30,9 @@ from omni_drones.views import ArticulationView, RigidPrimView
 from omni_drones.utils.torch import euler_to_quaternion, quat_axis
 
 from tensordict.tensordict import TensorDict, TensorDictBase
-from torchrl.data import UnboundedContinuousTensorSpec, CompositeSpec, DiscreteTensorSpec
+from torchrl.data import UnboundedContinuous, Composite, Categorical
 
-from omni.isaac.core.utils.viewports import set_camera_view
+from isaacsim.core.utils.viewports import set_camera_view
 
 
 class Forest(IsaacEnv):
@@ -47,7 +47,7 @@ class Forest(IsaacEnv):
 
     ## Observation
 
-    The observation is given by a `CompositeSpec` containing the following values:
+    The observation is given by a `Composite` containing the following values:
 
     - `"state"` (16 + `num_rotors`): The basic information of the drone
       (except its position), containing its rotation (in quaternion), velocities
@@ -130,10 +130,10 @@ class Forest(IsaacEnv):
 
         drone_prim = self.drone.spawn(translations=[(0.0, 0.0, 2.)])[0]
 
-        import omni.isaac.lab.sim as sim_utils
-        from omni.isaac.lab.assets import AssetBaseCfg
-        from omni.isaac.lab.sensors import RayCaster, RayCasterCfg, patterns
-        from omni.isaac.lab.terrains import (
+        from isaaclab.sim import sim_utils
+        from isaaclab.assets import AssetBaseCfg
+        from isaaclab.sensors import RayCaster, RayCasterCfg, patterns
+        from isaaclab.terrains import (
             TerrainImporterCfg,
             TerrainImporter,
             TerrainGeneratorCfg,
@@ -213,23 +213,23 @@ class Forest(IsaacEnv):
         drone_state_dim = self.drone.state_spec.shape[-1]
         observation_dim = drone_state_dim
 
-        self.observation_spec = CompositeSpec({
-            "agents": CompositeSpec({
-                "observation": CompositeSpec({
-                    "state": UnboundedContinuousTensorSpec((observation_dim,), device=self.device),
-                    "lidar": UnboundedContinuousTensorSpec((1, 36, 4), device=self.device),
+        self.observation_spec = Composite({
+            "agents": Composite({
+                "observation": Composite({
+                    "state": UnboundedContinuous((observation_dim,), device=self.device),
+                    "lidar": UnboundedContinuous((1, 36, 4), device=self.device),
                 }),
                 "intrinsics": self.drone.intrinsics_spec.to(self.device)
             }).expand(self.num_envs)
         }, shape=[self.num_envs], device=self.device)
-        self.action_spec = CompositeSpec({
-            "agents": CompositeSpec({
+        self.action_spec = Composite({
+            "agents": Composite({
                 "action": self.drone.action_spec,
             })
         }).expand(self.num_envs).to(self.device)
-        self.reward_spec = CompositeSpec({
-            "agents": CompositeSpec({
-                "reward": UnboundedContinuousTensorSpec((1,))
+        self.reward_spec = Composite({
+            "agents": Composite({
+                "reward": UnboundedContinuous((1,))
             })
         }).expand(self.num_envs).to(self.device)
         self.agent_spec["drone"] = AgentSpec(
@@ -240,11 +240,11 @@ class Forest(IsaacEnv):
             state_key=("agents", "intrinsics")
         )
 
-        stats_spec = CompositeSpec({
-            "return": UnboundedContinuousTensorSpec(1),
-            "episode_len": UnboundedContinuousTensorSpec(1),
-            "action_smoothness": UnboundedContinuousTensorSpec(1),
-            "safety": UnboundedContinuousTensorSpec(1)
+        stats_spec = Composite({
+            "return": UnboundedContinuous(1),
+            "episode_len": UnboundedContinuous(1),
+            "action_smoothness": UnboundedContinuous(1),
+            "safety": UnboundedContinuous(1)
         }).expand(self.num_envs).to(self.device)
         self.observation_spec["stats"] = stats_spec
         self.stats = stats_spec.zero()

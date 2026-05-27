@@ -25,13 +25,13 @@ import torch
 import torch.distributions as D
 from torch.func import vmap
 
-import omni.isaac.core.objects as objects
-from omni.isaac.debug_draw import _debug_draw
+from isaacsim.core.api import objects
+from isaacsim.util.debug_draw import _debug_draw
 
 import omni_drones.utils.kit as kit_utils
 
 from tensordict.tensordict import TensorDict, TensorDictBase
-from torchrl.data import UnboundedContinuousTensorSpec, CompositeSpec, DiscreteTensorSpec
+from torchrl.data import UnboundedContinuous, Composite, Categorical
 
 from omni_drones.envs.isaac_env import AgentSpec, IsaacEnv
 from omni_drones.views import RigidPrimView
@@ -54,7 +54,7 @@ class PlatformTrack(IsaacEnv):
 
     ## Observation
 
-    The observation is a `CompositeSpec` containing:
+    The observation is a `Composite` containing:
 
     - `obs_self` (1, \*): The state of each UAV observed by itself, containing its kinematic
       information with the position being relative to the frame center, and an one-hot
@@ -196,29 +196,29 @@ class PlatformTrack(IsaacEnv):
             self.time_encoding_dim = 4
             frame_state_dim += self.time_encoding_dim
 
-        observation_spec = CompositeSpec({
-            "obs_self": UnboundedContinuousTensorSpec((1, drone_state_dim + self.drone.n)),
-            "obs_others": UnboundedContinuousTensorSpec((self.drone.n-1, 13)),
-            "state_frame": UnboundedContinuousTensorSpec((1, frame_state_dim)),
+        observation_spec = Composite({
+            "obs_self": UnboundedContinuous((1, drone_state_dim + self.drone.n)),
+            "obs_others": UnboundedContinuous((self.drone.n-1, 13)),
+            "state_frame": UnboundedContinuous((1, frame_state_dim)),
         }).to(self.device)
-        observation_central_spec = CompositeSpec({
-            "state_drones": UnboundedContinuousTensorSpec((self.drone.n, drone_state_dim + self.drone.n)),
-            "state_frame": UnboundedContinuousTensorSpec((1, frame_state_dim)),
+        observation_central_spec = Composite({
+            "state_drones": UnboundedContinuous((self.drone.n, drone_state_dim + self.drone.n)),
+            "state_frame": UnboundedContinuous((1, frame_state_dim)),
         }).to(self.device)
-        self.observation_spec = CompositeSpec({
+        self.observation_spec = Composite({
             "agents": {
                 "observation": observation_spec.expand(self.drone.n),
                 "observation_central": observation_central_spec,
             },
         }).expand(self.num_envs).to(self.device)
-        self.action_spec = CompositeSpec({
+        self.action_spec = Composite({
             "agents": {
                 "action": torch.stack([self.drone.action_spec] * self.drone.n, dim=0),
             }
         }).expand(self.num_envs).to(self.device)
-        self.reward_spec = CompositeSpec({
+        self.reward_spec = Composite({
             "agents": {
-                "reward": UnboundedContinuousTensorSpec((self.drone.n, 1))
+                "reward": UnboundedContinuous((self.drone.n, 1))
             }
         }).expand(self.num_envs).to(self.device)
         self.agent_spec["drone"] = AgentSpec(
@@ -229,13 +229,13 @@ class PlatformTrack(IsaacEnv):
             state_key=("agents", "observation_central")
         )
 
-        stats_spec = CompositeSpec({
-            "return": UnboundedContinuousTensorSpec(self.drone.n),
-            "episode_len": UnboundedContinuousTensorSpec(1),
-            "pos_error": UnboundedContinuousTensorSpec(1),
-            "heading_alignment": UnboundedContinuousTensorSpec(1),
-            "effort": UnboundedContinuousTensorSpec(1),
-            "action_smoothness": UnboundedContinuousTensorSpec(1),
+        stats_spec = Composite({
+            "return": UnboundedContinuous(self.drone.n),
+            "episode_len": UnboundedContinuous(1),
+            "pos_error": UnboundedContinuous(1),
+            "heading_alignment": UnboundedContinuous(1),
+            "effort": UnboundedContinuous(1),
+            "action_smoothness": UnboundedContinuous(1),
         }).expand(self.num_envs).to(self.device)
         self.observation_spec["stats"] = stats_spec
         self.stats = stats_spec.zero()

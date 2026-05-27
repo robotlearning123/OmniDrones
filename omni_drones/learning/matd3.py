@@ -25,14 +25,14 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.func import vmap
-from tensordict.nn import TensorDictModule, make_functional
+from tensordict.nn import TensorDictModule
 from tensordict import TensorDict
 
 from torchrl.data import (
     TensorSpec,
-    BoundedTensorSpec,
-    UnboundedContinuousTensorSpec as UnboundedTensorSpec,
-    CompositeSpec,
+    Bounded,
+    UnboundedContinuous as UnboundedTensorSpec,
+    Composite,
     TensorDictReplayBuffer
 )
 from torchrl.data.replay_buffers.storages import LazyTensorStorage
@@ -101,13 +101,13 @@ class MATD3Policy(object):
         if self.cfg.share_actor:
             self.actor = create_actor()
             self.actor_opt = torch.optim.Adam(self.actor.parameters(), lr=self.cfg.actor.lr)
-            self.actor_params = make_functional(self.actor).expand(self.agent_spec.n)
+            self.actor_params = TensorDict.from_module(self.actor).expand(self.agent_spec.n)
             self.actor_target_params = self.actor_params.clone()
         else:
             actors = nn.ModuleList([create_actor() for _ in range(self.agent_spec.n)])
             self.actor = actors[0]
             self.actor_opt = torch.optim.Adam(actors.parameters(), lr=self.cfg.actor.lr)
-            self.actor_params = torch.stack([make_functional(actor) for actor in actors])
+            self.actor_params = torch.stack([TensorDict.from_module(actor) for actor in actors])
             self.actor_target_params = self.actor_params.clone()
 
         if self.agent_spec.state_spec is not None:
@@ -259,7 +259,7 @@ class Critic(nn.Module):
         cfg,
         num_agents: int,
         state_spec: TensorSpec,
-        action_spec: BoundedTensorSpec,
+        action_spec: Bounded,
         num_critics: int = 2,
     ) -> None:
         super().__init__()
@@ -274,7 +274,7 @@ class Critic(nn.Module):
         ])
 
     def _make_critic(self):
-        if isinstance(self.state_spec, (BoundedTensorSpec, UnboundedTensorSpec)):
+        if isinstance(self.state_spec, (Bounded, UnboundedTensorSpec)):
             action_dim = self.act_space.shape[-1]
             state_dim = self.state_spec.shape[-1]
             num_units = [
@@ -282,9 +282,9 @@ class Critic(nn.Module):
                 *self.cfg["hidden_units"]
             ]
             base = MLP(num_units)
-        elif isinstance(self.state_spec, CompositeSpec):
+        elif isinstance(self.state_spec, Composite):
             encoder_cls = ENCODERS_MAP[self.cfg.attn_encoder]
-            base = encoder_cls(CompositeSpec(self.state_spec))
+            base = encoder_cls(Composite(self.state_spec))
         else:
             raise NotImplementedError
 

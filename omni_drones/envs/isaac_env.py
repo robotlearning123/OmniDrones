@@ -30,20 +30,20 @@ import torch
 import logging
 import carb
 import numpy as np
-from omni.isaac.cloner import GridCloner
-from omni.isaac.core.simulation_context import SimulationContext
-from omni.isaac.core.utils import prims as prim_utils, stage as stage_utils
-from omni.isaac.core.utils.extensions import enable_extension
-from omni.isaac.core.utils.viewports import set_camera_view
+from isaacsim.core.cloner import GridCloner
+from isaacsim.core.api.simulation_context import SimulationContext
+from isaacsim.core.utils import prims as prim_utils, stage as stage_utils
+from isaacsim.core.utils.extensions import enable_extension
+from isaacsim.core.utils.viewports import set_camera_view
 
 from tensordict.tensordict import TensorDict, TensorDictBase
-from torchrl.data import CompositeSpec, TensorSpec, DiscreteTensorSpec
+from torchrl.data import Composite, TensorSpec, Categorical
 from torchrl.envs import EnvBase
 
 from omni_drones.robots.robot import RobotBase
 from omni_drones.utils.torchrl import AgentSpec
 
-from omni.isaac.debug_draw import _debug_draw
+from isaacsim.util.debug_draw import _debug_draw
 
 class DebugDraw:
     def __init__(self):
@@ -177,10 +177,10 @@ class IsaacEnv(EnvBase):
             self.batch_size,
         )
         self.progress_buf = self._tensordict["progress"]
-        self.done_spec = CompositeSpec({
-            "done": DiscreteTensorSpec(2, (1,), dtype=torch.bool),
-            "terminated": DiscreteTensorSpec(2, (1,), dtype=torch.bool),
-            "truncated": DiscreteTensorSpec(2, (1,), dtype=torch.bool),
+        self.done_spec = Composite({
+            "done": Categorical(2, (1,), dtype=torch.bool),
+            "terminated": Categorical(2, (1,), dtype=torch.bool),
+            "truncated": Categorical(2, (1,), dtype=torch.bool),
         }).expand(self.num_envs).to(self.device)
         self._set_specs()
         import pprint

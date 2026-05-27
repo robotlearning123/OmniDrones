@@ -36,11 +36,10 @@ from tensordict.nn import (
     TensorDictSequential,
     TensorDictModule,
     TensorDictModuleBase,
-    make_functional,
     TensorDictParams
 )
 from torchrl.modules import ProbabilisticActor
-from torchrl.data import TensorSpec, CompositeSpec
+from torchrl.data import TensorSpec, Composite
 from torchrl.envs.transforms import CatTensors
 from einops.layers.torch import Rearrange, Reduce
 
@@ -49,7 +48,7 @@ from .modules.distributions import IndependentNormal
 from .utils.valuenorm import ValueNorm1
 
 def make_transformer(
-    obs_spec: CompositeSpec,
+    obs_spec: Composite,
     embed_dim: int=128,
     nhead: int=1,
     num_layers: int=1
@@ -106,7 +105,7 @@ class EnsembleModule(_EnsembleModule):
         self.out_keys = module.out_keys
         self.num_copies = num_copies
 
-        params_td = make_functional(module).expand(num_copies).to_tensordict()
+        params_td = TensorDict.from_module(module).expand(num_copies).to_tensordict()
         self.module = module
         self.vmapped_forward = vmap(self.module, (1, 0), 1)
         self.reset_parameters_recursive(params_td)
@@ -129,7 +128,7 @@ class MAPPO:
     def __init__(
         self,
         cfg,
-        observation_spec: CompositeSpec,
+        observation_spec: Composite,
         action_spec: TensorSpec,
         reward_spec: TensorSpec,
         device

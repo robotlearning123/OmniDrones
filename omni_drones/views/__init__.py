@@ -28,13 +28,14 @@ from contextlib import contextmanager
 from typing import List, Optional, Tuple, Union
 import numpy as np
 import carb
-from omni.isaac.core.utils.prims import get_prim_parent, get_prim_at_path, set_prim_property, get_prim_property
+from isaacsim.core.utils.prims import get_prim_parent, get_prim_at_path, set_prim_property, get_prim_property
 from pxr import Usd, UsdGeom, UsdPhysics, PhysxSchema
-from omni.isaac.core.utils.types import JointsState, ArticulationActions
-from omni.isaac.core.articulations import ArticulationView as _ArticulationView
-from omni.isaac.core.prims import RigidPrimView as _RigidPrimView
-from omni.isaac.core.prims import XFormPrimView
-from omni.isaac.core.simulation_context import SimulationContext
+from isaacsim.core.utils.types import JointsState, ArticulationActions
+from isaacsim.core.prims import Articulation as _ArticulationView
+from isaacsim.core.prims import RigidPrim as _RigidPrimView
+from isaacsim.core.prims import XFormPrim as XFormPrimView
+from isaacsim.core.api.simulation_context import SimulationContext
+from isaacsim.core.simulation_manager import SimulationManager
 import omni
 import functools
 
@@ -43,8 +44,8 @@ def require_sim_initialized(func):
 
     @functools.wraps(func)
     def _func(*args, **kwargs):
-        if SimulationContext.instance()._physics_sim_view is None:
-            raise RuntimeError("SimulationContext not initialzed.")
+        if not SimulationContext.instance().is_simulating():
+            raise RuntimeError("SimulationContext not initialized.")
         return func(*args, **kwargs)
 
     return _func
@@ -64,6 +65,8 @@ class ArticulationView(_ArticulationView):
         shape: Tuple[int, ...] = (-1,),
     ) -> None:
         self.shape = shape
+        self._physics_sim_view = None
+        self._physics_view = None
         super().__init__(
             prim_paths_expr,
             name,
@@ -83,8 +86,9 @@ class ArticulationView(_ArticulationView):
             physics_sim_view (omni.physics.tensors.SimulationView, optional): current physics simulation view. Defaults to None.
         """
         if physics_sim_view is None:
-            physics_sim_view = omni.physics.tensors.create_simulation_view(self._backend)
-            physics_sim_view.set_subspace_roots("/")
+            physics_sim_view = SimulationManager.get_physics_sim_view()
+            if physics_sim_view is None:
+                raise RuntimeError("Physics simulation view not available. Call sim.reset() first.")
         carb.log_info("initializing view for {}".format(self._name))
         # TODO: add a callback to set physics view to None once stop is called
         self._physics_view = physics_sim_view.create_articulation_view(
@@ -195,14 +199,14 @@ class ArticulationView(_ArticulationView):
                         kps[articulation_write_idx][dof_write_idx] = drive.GetStiffnessAttr().Get()
                     else:
                         kps[articulation_write_idx][dof_write_idx] = self._backend_utils.convert(
-                            1.0 / omni.isaac.core.utils.numpy.deg2rad(float(1.0 / drive.GetStiffnessAttr().Get())),
+                            1.0 / isaacsim.core.utils.numpy.deg2rad(float(1.0 / drive.GetStiffnessAttr().Get())),
                             device=self._device,
                         )
                     if drive.GetDampingAttr().Get() == 0.0 or drive_type == "linear":
                         kds[articulation_write_idx][dof_write_idx] = drive.GetDampingAttr().Get()
                     else:
                         kds[articulation_write_idx][dof_write_idx] = self._backend_utils.convert(
-                            1.0 / omni.isaac.core.utils.numpy.deg2rad(float(1.0 / drive.GetDampingAttr().Get())),
+                            1.0 / isaacsim.core.utils.numpy.deg2rad(float(1.0 / drive.GetDampingAttr().Get())),
                             device=self._device,
                         )
                     dof_write_idx += 1
@@ -224,14 +228,16 @@ class ArticulationView(_ArticulationView):
         if not omni.timeline.get_timeline_interface().is_stopped() and self._physics_view is not None:
             if self.num_dof == 0:
                 return None
-            self._physics_sim_view.enable_warnings(False)
+            if self._physics_sim_view is not None:
+                self._physics_sim_view.enable_warnings(False)
             joint_positions = self._physics_view.get_dof_position_targets()
             if clone:
                 joint_positions = self._backend_utils.clone_tensor(joint_positions, device=self._device)
             joint_velocities = self._physics_view.get_dof_velocity_targets()
             if clone:
                 joint_velocities = self._backend_utils.clone_tensor(joint_velocities, device=self._device)
-            self._physics_sim_view.enable_warnings(True)
+            if self._physics_sim_view is not None:
+                self._physics_sim_view.enable_warnings(True)
             # TODO: implement the effort part
             return ArticulationActions(
                 joint_positions=joint_positions,
@@ -244,7 +250,7 @@ class ArticulationView(_ArticulationView):
             return None
 
     def get_world_poses(
-        self, env_indices: Optional[torch.Tensor] = None, clone: bool = True
+        self, env_indices: Optional[torch.Tensor] = None, clone: bool = True, **kwargs
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         indices = self._resolve_env_indices(env_indices)
         if self._physics_view is not None:
@@ -255,7 +261,7 @@ class ArticulationView(_ArticulationView):
                 poses = poses.clone()
             return poses[..., :3], poses[..., [6, 3, 4, 5]]
         else:
-            pos, rot = super().get_world_poses(indices, clone)
+            pos, rot = super().get_world_poses(indices, clone, **kwargs)
             return pos.unflatten(0, self.shape), rot.unflatten(0, self.shape)
 
     def set_world_poses(
@@ -459,10 +465,10 @@ class RigidPrimView(_RigidPrimView):
         return self
 
     def get_world_poses(
-        self, env_indices: Optional[torch.Tensor] = None, clone: bool = True
+        self, env_indices: Optional[torch.Tensor] = None, clone: bool = True, **kwargs
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         indices = self._resolve_env_indices(env_indices)
-        pos, rot = super().get_world_poses(indices, clone)
+        pos, rot = super().get_world_poses(indices, clone, **kwargs)
         return pos.unflatten(0, self.shape), rot.unflatten(0, self.shape)
 
     def set_world_poses(
@@ -614,8 +620,11 @@ class RigidPrimView(_RigidPrimView):
 
 @contextmanager
 def disable_warnings(physics_sim_view):
-    try:
-        physics_sim_view.enable_warnings(False)
+    if physics_sim_view is not None:
+        try:
+            physics_sim_view.enable_warnings(False)
+            yield
+        finally:
+            physics_sim_view.enable_warnings(True)
+    else:
         yield
-    finally:
-        physics_sim_view.enable_warnings(True)

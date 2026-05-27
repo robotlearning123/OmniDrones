@@ -21,7 +21,7 @@
 # SOFTWARE.
 
 
-import omni.isaac.core.utils.torch as torch_utils
+from isaacsim.core.utils import torch as torch_utils
 import omni_drones.utils.kit as kit_utils
 import omni_drones.utils.scene as scene_utils
 import torch
@@ -32,7 +32,7 @@ from omni_drones.envs.isaac_env import AgentSpec, IsaacEnv, List, Optional
 from omni_drones.utils.torch import cpos, off_diag, others, euler_to_quaternion
 from omni_drones.robots.drone import MultirotorBase
 from tensordict.tensordict import TensorDict, TensorDictBase
-from torchrl.data import CompositeSpec, UnboundedContinuousTensorSpec
+from torchrl.data import Composite, UnboundedContinuous
 
 def sample_from_grid(cells: torch.Tensor, n):
     idx = torch.randperm(cells.shape[0], device=cells.device)[:n]
@@ -49,13 +49,13 @@ class Rearrange(IsaacEnv):
         self.init_poses = self.drone.get_world_poses(clone=True)
 
         drone_state_dim = self.drone.state_spec.shape[0]
-        observation_spec = CompositeSpec({
-            "state_self": UnboundedContinuousTensorSpec((1, drone_state_dim)),
-            "state_others": UnboundedContinuousTensorSpec((self.drone.n-1, drone_state_dim+1)),
+        observation_spec = Composite({
+            "state_self": UnboundedContinuous((1, drone_state_dim)),
+            "state_others": UnboundedContinuous((self.drone.n-1, drone_state_dim+1)),
         }).to(self.device)
 
-        state_spec = CompositeSpec({
-            "drones": UnboundedContinuousTensorSpec((self.drone.n, drone_state_dim))
+        state_spec = Composite({
+            "drones": UnboundedContinuous((self.drone.n, drone_state_dim))
         }).to(self.device)
 
         self.agent_spec["drone"] = AgentSpec(
@@ -63,7 +63,7 @@ class Rearrange(IsaacEnv):
             self.drone.n,
             observation_spec,
             self.drone.action_spec.to(self.device),
-            UnboundedContinuousTensorSpec(1).to(self.device),
+            UnboundedContinuous(1).to(self.device),
             state_spec,
         )
 
@@ -76,10 +76,10 @@ class Rearrange(IsaacEnv):
 
         self.alpha = 0.7
         # additional infos & buffers
-        stats_spec = CompositeSpec({
-            "pos_error": UnboundedContinuousTensorSpec(self.drone.n, 1),
-            "effort": UnboundedContinuousTensorSpec(self.drone.n, 1),
-            # "collision": UnboundedContinuousTensorSpec(1)
+        stats_spec = Composite({
+            "pos_error": UnboundedContinuous(self.drone.n, 1),
+            "effort": UnboundedContinuous(self.drone.n, 1),
+            # "collision": UnboundedContinuous(1)
         }).expand(self.num_envs).to(self.device)
         self.observation_spec["stats"] = stats_spec
         self.stats = stats_spec.zero()

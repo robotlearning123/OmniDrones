@@ -21,10 +21,10 @@
 # SOFTWARE.
 
 
-import omni.isaac.core.utils.prims as prim_utils
+from isaacsim.core.utils import prims as prim_utils
 import omni.physx.scripts.utils as script_utils
 from pxr import UsdPhysics
-import omni.isaac.core.objects as objects
+from isaacsim.core.api import objects
 
 import omni_drones.utils.kit as kit_utils
 from ..utils import create_bar

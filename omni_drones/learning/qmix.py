@@ -29,7 +29,7 @@ from tensordict import TensorDict
 from tensordict.utils import expand_right
 from tensordict.nn import TensorDictModule, TensorDictSequential
 from torchrl.data import (
-    DiscreteTensorSpec,
+    Categorical,
 )
 from .modules.rnn import GRU
 from .modules.networks import ENCODERS_MAP, MLP
@@ -52,7 +52,7 @@ class QMIXPolicy:
         self.agent_name = agent_spec.name
 
         n_agents = agent_spec.n
-        if not isinstance(agent_spec.action_spec, DiscreteTensorSpec):
+        if not isinstance(agent_spec.action_spec, Categorical):
             raise ValueError("Only discrete action spaces are supported for QMIX.")
 
         num_actions = agent_spec.action_spec.space.n

@@ -25,10 +25,10 @@ from typing import Sequence
 import torch
 from dataclasses import dataclass, field, MISSING, fields, asdict
 
-from torchrl.data import BoundedTensorSpec, UnboundedContinuousTensorSpec, CompositeSpec
-from tensordict.nn import make_functional
+from torchrl.data import Bounded, UnboundedContinuous, Composite
+from tensordict import TensorDict
 
-import omni.isaac.core.utils.prims as prim_utils
+from isaacsim.core.utils import prims as prim_utils
 import omni.physx.scripts.utils as script_utils
 from pxr import PhysxSchema, UsdPhysics
 from omni.usd.commands import MovePrimCommand
@@ -60,15 +60,15 @@ class RotorConfig:
 @dataclass
 class DragonCfg(RobotCfg):
     num_links: int = 4
-    articulation_props: ArticulationRootPropertiesCfg = ArticulationRootPropertiesCfg(
-        solver_velocity_iteration_count=16, enable_self_collisions=True)
+    articulation_props: ArticulationRootPropertiesCfg = field(default_factory=lambda: ArticulationRootPropertiesCfg(
+        solver_velocity_iteration_count=16, enable_self_collisions=True))
     force_sensor: bool = False
-    rotor_cfg: RotorConfig = RotorConfig(
+    rotor_cfg: RotorConfig = field(default_factory=lambda: RotorConfig(
         directions=torch.tensor([1, -1]),
         force_constants=torch.ones(2) * 7.2e-6,
         moment_constants=torch.ones(2) * 1.08e-7,
         max_rotation_velocities=torch.ones(2) * 800
-    )
+    ))
 
     def __post_init__(self):
         self.rotor_cfg = RotorConfig(**{
@@ -82,14 +82,16 @@ class Dragon(MultirotorBase):
 
     cfg_cls = DragonCfg
 
-    def __init__(self, name: str = "dragon", cfg: DragonCfg = DragonCfg(), is_articulation: bool = True) -> None:
+    def __init__(self, name: str = "dragon", cfg: DragonCfg = None, is_articulation: bool = True) -> None:
+        if cfg is None:
+            cfg = DragonCfg()
         super(MultirotorBase, self).__init__(name, cfg, is_articulation)
         self.num_rotors = self.cfg.rotor_cfg.num_rotors
         self.num_links = self.cfg.num_links
 
         self.action_split = [self.cfg.rotor_cfg.num_rotors, self.num_links * 2, (self.num_links-1) * 2]
         action_dim = sum(self.action_split)
-        self._action_spec = BoundedTensorSpec(-1, 1, action_dim, device=self.device)
+        self._action_spec = Bounded(-1, 1, action_dim, device=self.device)
         observation_dim = (
             self.num_links * (
                 13 + 3 + 3
@@ -97,10 +99,10 @@ class Dragon(MultirotorBase):
             )
             + (self.num_links-1) * 2 # link joint pos
         )
-        self.state_spec = UnboundedContinuousTensorSpec(observation_dim, device=self.device)
-        self.intrinsics_spec = CompositeSpec({
-            "KF": UnboundedContinuousTensorSpec(self.num_rotors),
-            "KM": UnboundedContinuousTensorSpec(self.num_rotors),
+        self.state_spec = UnboundedContinuous(observation_dim, device=self.device)
+        self.intrinsics_spec = Composite({
+            "KF": UnboundedContinuous(self.num_rotors),
+            "KM": UnboundedContinuous(self.num_rotors),
         }).to(self.device)
         self.randomization = defaultdict(dict)
 
@@ -138,7 +140,7 @@ class Dragon(MultirotorBase):
         self.gravity = self.body_masses.sum(-1, keepdim=True) * 9.81
 
         self.rotors = RotorGroup(asdict(self.cfg.rotor_cfg), self.dt).to(self.device)
-        rotor_params = make_functional(self.rotors)
+        rotor_params = TensorDict.from_module(self.rotors)
         self.rotor_params = rotor_params.expand(self.shape).clone()
         self.throttle = self.rotor_params["throttle"]
         self.throttle_difference = torch.zeros_like(self.throttle)

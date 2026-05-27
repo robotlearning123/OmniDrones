@@ -8,12 +8,12 @@ import math
 from typing import Optional, Sequence
 
 import carb
-import omni.isaac.core.utils.nucleus as nucleus_utils
-import omni.isaac.core.utils.prims as prim_utils
+from isaacsim.storage.native import get_assets_root_path
+from isaacsim.core.utils import prims as prim_utils
 import omni.kit
-from omni.isaac.core.materials import PhysicsMaterial
-from omni.isaac.core.prims import GeometryPrim
-from omni.isaac.version import get_version
+from isaacsim.core.api.materials import PhysicsMaterial
+from isaacsim.core.prims import GeometryPrim
+from isaacsim.core.version import get_version
 from pxr import Gf, PhysxSchema, UsdPhysics
 
 
@@ -73,9 +73,10 @@ def create_ground_plane(
     )
     # Apply PhysX Rigid Material schema
     physx_material_api = PhysxSchema.PhysxMaterialAPI.Apply(material.prim)
-    # Set patch friction property
+    # Set patch friction property (removed in newer PhysX SDK)
     improve_patch_friction = kwargs.get("improve_patch_friction", False)
-    physx_material_api.CreateImprovePatchFrictionAttr().Set(improve_patch_friction)
+    if hasattr(physx_material_api, "CreateImprovePatchFrictionAttr"):
+        physx_material_api.CreateImprovePatchFrictionAttr().Set(improve_patch_friction)
     # Set combination mode for coefficients
     combine_mode = kwargs.get("friciton_combine_mode", "multiply")
     physx_material_api.CreateFrictionCombineModeAttr().Set(combine_mode)
@@ -86,8 +87,8 @@ def create_ground_plane(
             prim_path, predicate=lambda x: prim_utils.get_prim_type_name(x) == "Plane"
         )
     )
-    geom_prim = GeometryPrim(collision_prim_path, disable_stablization=False, collision=True)
-    geom_prim.apply_physics_material(material)
+    geom_prim = GeometryPrim(collision_prim_path, disable_stablization=False, collisions=[True])
+    geom_prim.apply_physics_materials(material)
     # Change the color of the plane
     # Warning: This is specific to the default grid plane asset.
     if color is not None:

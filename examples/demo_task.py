@@ -9,7 +9,7 @@ from tqdm import trange
 from omegaconf import OmegaConf
 
 from omni_drones import init_simulation_app
-from torchrl.data import CompositeSpec
+from torchrl.data import Composite
 from torchrl.envs.utils import set_exploration_type, ExplorationType
 from omni_drones.utils.torchrl.transforms import (
     FromMultiDiscreteAction,
@@ -63,7 +63,7 @@ def main(cfg):
 
     transforms = [InitTracker()]
 
-    # a CompositeSpec is by default processed by a entity-based encoder
+    # a Composite is by default processed by a entity-based encoder
     # ravel it to use a MLP encoder instead
     if artifact_cfg.task.get("ravel_obs", False):
         transform = ravel_composite(base_env.observation_spec, ("agents", "observation"))
@@ -74,7 +74,7 @@ def main(cfg):
     if (
         artifact_cfg.task.get("ravel_intrinsics", True)
         and ("agents", "intrinsics") in base_env.observation_spec.keys(True)
-        and isinstance(base_env.observation_spec[("agents", "intrinsics")], CompositeSpec)
+        and isinstance(base_env.observation_spec[("agents", "intrinsics")], Composite)
     ):
         transforms.append(ravel_composite(base_env.observation_spec, ("agents", "intrinsics"), start_dim=-1))
 

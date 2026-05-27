@@ -12,7 +12,7 @@ from tqdm import tqdm
 from omegaconf import OmegaConf
 
 from omni_drones import init_simulation_app
-from torchrl.data import CompositeSpec, TensorSpec
+from torchrl.data import Composite, TensorSpec
 from torchrl.envs.utils import set_exploration_type, ExplorationType
 from omni_drones.utils.torchrl import SyncDataCollector
 from omni_drones.utils.torchrl.transforms import (
@@ -42,7 +42,7 @@ from torchrl.modules import ProbabilisticActor
 
 class PPOPolicy(TensorDictModuleBase):
 
-    def __init__(self, cfg: PPOConfig, observation_spec: CompositeSpec, action_spec: CompositeSpec, reward_spec: TensorSpec, device):
+    def __init__(self, cfg: PPOConfig, observation_spec: Composite, action_spec: Composite, reward_spec: TensorSpec, device):
         super().__init__()
         self.cfg = cfg
         self.device = device
@@ -199,7 +199,7 @@ def main(cfg):
 
     transforms = [InitTracker()]
 
-    # a CompositeSpec is by default processed by a entity-based encoder
+    # a Composite is by default processed by a entity-based encoder
     # ravel it to use a MLP encoder instead
     if cfg.task.get("ravel_obs", False):
         transform = ravel_composite(base_env.observation_spec, ("agents", "observation"))
@@ -210,7 +210,7 @@ def main(cfg):
     if (
         cfg.task.get("flatten_intrinsics", True)
         and ("agents", "intrinsics") in base_env.observation_spec.keys(True)
-        and isinstance(base_env.observation_spec[("agents", "intrinsics")], CompositeSpec)
+        and isinstance(base_env.observation_spec[("agents", "intrinsics")], Composite)
     ):
         transforms.append(ravel_composite(base_env.observation_spec, ("agents", "intrinsics"), start_dim=-1))
 

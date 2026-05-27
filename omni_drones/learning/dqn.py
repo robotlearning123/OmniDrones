@@ -27,7 +27,7 @@ import torch.nn.functional as F
 from tensordict.nn import TensorDictModule
 
 from torchrl.data import (
-    DiscreteTensorSpec,
+    Categorical,
     TensorDictReplayBuffer
 )
 from torchrl.data.replay_buffers.storages import LazyTensorStorage
@@ -113,7 +113,7 @@ class DQNPolicy:
         self.act_name = ("action", f"{self.agent_spec.name}.action")
         self.reward_name = f"{self.agent_spec.name}.reward"
 
-        if not isinstance(agent_spec.action_spec, DiscreteTensorSpec):
+        if not isinstance(agent_spec.action_spec, Categorical):
             raise ValueError("Only discrete action spaces are supported for DQN.")
 
         self.num_actions = agent_spec.action_spec.space.n

@@ -26,14 +26,14 @@ import torch.distributions as D
 from torch.func import vmap
 from tensordict.tensordict import TensorDict, TensorDictBase
 from torchrl.data import (
-    CompositeSpec,
-    UnboundedContinuousTensorSpec,
-    DiscreteTensorSpec
+    Composite,
+    UnboundedContinuous,
+    Categorical
 )
 
-import omni.isaac.core.utils.prims as prim_utils
+from isaacsim.core.utils import prims as prim_utils
 import omni.physx.scripts.utils as script_utils
-from omni.isaac.core.objects import DynamicCuboid
+from isaacsim.core.api.objects import DynamicCuboid
 
 import omni_drones.utils.kit as kit_utils
 import omni_drones.utils.scene as scene_utils
@@ -54,7 +54,7 @@ class TransportFlyThrough(IsaacEnv):
 
     ## Observation
 
-    The observation space is specified by a :py:class:`CompositeSpec` containing the following items:
+    The observation space is specified by a :py:class:`Composite` containing the following items:
 
     - `obs_self` (1, \*): The state of each UAV observed by itself, containing its kinematic
       information with the position being relative to the payload. It also includes a one-hot
@@ -171,33 +171,33 @@ class TransportFlyThrough(IsaacEnv):
             self.time_encoding_dim = 4
             payload_state_dim += self.time_encoding_dim
 
-        observation_spec = CompositeSpec({
-            "obs_self": UnboundedContinuousTensorSpec((1, drone_state_dim)),
-            "obs_others": UnboundedContinuousTensorSpec((self.drone.n-1, 13+1)),
-            "obs_payload": UnboundedContinuousTensorSpec((1, payload_state_dim)),
-            "obs_obstacles": UnboundedContinuousTensorSpec((2, 2)),
+        observation_spec = Composite({
+            "obs_self": UnboundedContinuous((1, drone_state_dim)),
+            "obs_others": UnboundedContinuous((self.drone.n-1, 13+1)),
+            "obs_payload": UnboundedContinuous((1, payload_state_dim)),
+            "obs_obstacles": UnboundedContinuous((2, 2)),
         }).to(self.device)
 
-        observation_central_spec = CompositeSpec({
-            "state_drones": UnboundedContinuousTensorSpec((self.drone.n, drone_state_dim)),
-            "state_payload": UnboundedContinuousTensorSpec((1, payload_state_dim)),
-            "obstacles": UnboundedContinuousTensorSpec((2, 2)),
+        observation_central_spec = Composite({
+            "state_drones": UnboundedContinuous((self.drone.n, drone_state_dim)),
+            "state_payload": UnboundedContinuous((1, payload_state_dim)),
+            "obstacles": UnboundedContinuous((2, 2)),
         }).to(self.device)
 
-        self.observation_spec = CompositeSpec({
+        self.observation_spec = Composite({
             "agents": {
                 "observation": observation_spec.expand(self.drone.n),
                 "observation_central": observation_central_spec,
             }
         }).expand(self.num_envs).to(self.device)
-        self.action_spec = CompositeSpec({
+        self.action_spec = Composite({
             "agents": {
                 "action": self.drone.action_spec.expand(self.drone.n),
             }
         }).expand(self.num_envs).to(self.device)
-        self.reward_spec = CompositeSpec({
+        self.reward_spec = Composite({
             "agents": {
-                "reward": UnboundedContinuousTensorSpec((self.drone.n, 1))
+                "reward": UnboundedContinuous((self.drone.n, 1))
             }
         }).expand(self.num_envs).to(self.device)
         self.agent_spec["drone"] = AgentSpec(
@@ -207,13 +207,13 @@ class TransportFlyThrough(IsaacEnv):
             reward_key=("agents", "reward"),
         )
 
-        stats_spec = CompositeSpec({
-            "return": UnboundedContinuousTensorSpec(self.drone.n),
-            "episode_len": UnboundedContinuousTensorSpec(1),
-            "payload_pos_error": UnboundedContinuousTensorSpec(1),
-            "collision": UnboundedContinuousTensorSpec(1),
-            "success": DiscreteTensorSpec(2, (1,), dtype=torch.bool),
-            "action_smoothness": UnboundedContinuousTensorSpec(self.drone.n),
+        stats_spec = Composite({
+            "return": UnboundedContinuous(self.drone.n),
+            "episode_len": UnboundedContinuous(1),
+            "payload_pos_error": UnboundedContinuous(1),
+            "collision": UnboundedContinuous(1),
+            "success": Categorical(2, (1,), dtype=torch.bool),
+            "action_smoothness": UnboundedContinuous(self.drone.n),
         }).expand(self.num_envs).to(self.device)
         self.observation_spec["stats"] = stats_spec
         self.stats = stats_spec.zero()

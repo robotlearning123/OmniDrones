@@ -23,10 +23,10 @@
 
 import torch
 
-from omni.isaac.core.prims import RigidPrimView
-from omni.isaac.core.utils.nucleus import get_assets_root_path
-from tensordict.nn import make_functional
-from torchrl.data import BoundedTensorSpec, UnboundedContinuousTensorSpec
+from isaacsim.core.prims import RigidPrim as RigidPrimView
+from isaacsim.storage.native import get_assets_root_path
+from tensordict import TensorDict
+from torchrl.data import Bounded, UnboundedContinuous
 
 from omni_drones.actuators.rotor_group import RotorGroup
 from omni_drones.robots import ASSET_PATH

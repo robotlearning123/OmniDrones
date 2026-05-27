@@ -31,7 +31,7 @@ from omni_drones.envs.isaac_env import AgentSpec, IsaacEnv, List, Optional
 from omni_drones.utils.torch import cpos, off_diag, others, make_cells, euler_to_quaternion
 from omni_drones.robots.drone import MultirotorBase
 from tensordict.tensordict import TensorDict, TensorDictBase
-from torchrl.data import CompositeSpec, UnboundedContinuousTensorSpec, DiscreteTensorSpec
+from torchrl.data import Composite, UnboundedContinuous, Categorical
 
 REGULAR_HEXAGON = [
     [0, 0, 0],
@@ -151,27 +151,27 @@ class Formation(IsaacEnv):
             self.time_encoding_dim = 4
             obs_self_dim += self.time_encoding_dim
 
-        observation_spec = CompositeSpec({
-            "obs_self": UnboundedContinuousTensorSpec((1, obs_self_dim)),
-            "obs_others": UnboundedContinuousTensorSpec((self.drone.n-1, 13+1)),
+        observation_spec = Composite({
+            "obs_self": UnboundedContinuous((1, obs_self_dim)),
+            "obs_others": UnboundedContinuous((self.drone.n-1, 13+1)),
         }).to(self.device)
-        observation_central_spec = CompositeSpec({
-            "drones": UnboundedContinuousTensorSpec((self.drone.n, drone_state_dim)),
+        observation_central_spec = Composite({
+            "drones": UnboundedContinuous((self.drone.n, drone_state_dim)),
         }).to(self.device)
-        self.observation_spec = CompositeSpec({
+        self.observation_spec = Composite({
             "agents": {
                 "observation": observation_spec.expand(self.drone.n),
                 "observation_central": observation_central_spec,
             }
         }).expand(self.num_envs).to(self.device)
-        self.action_spec = CompositeSpec({
+        self.action_spec = Composite({
             "agents": {
                 "action": torch.stack([self.drone.action_spec] * self.drone.n, dim=0),
             }
         }).expand(self.num_envs).to(self.device)
-        self.reward_spec = CompositeSpec({
+        self.reward_spec = Composite({
             "agents": {
-                "reward": UnboundedContinuousTensorSpec((self.drone.n, 1))
+                "reward": UnboundedContinuous((self.drone.n, 1))
             }
         }).expand(self.num_envs).to(self.device)
         self.agent_spec["drone"] = AgentSpec(
@@ -183,12 +183,12 @@ class Formation(IsaacEnv):
             state_key=("agents", "observation_central")
         )
          # additional infos & buffers
-        stats_spec = CompositeSpec({
-            "return": UnboundedContinuousTensorSpec(self.drone.n),
-            "episode_len": UnboundedContinuousTensorSpec(1),
-            # "cost_laplacian": UnboundedContinuousTensorSpec((self.num_envs, 1)),
-            "cost_hausdorff": UnboundedContinuousTensorSpec(1),
-            "pos_error": UnboundedContinuousTensorSpec(1)
+        stats_spec = Composite({
+            "return": UnboundedContinuous(self.drone.n),
+            "episode_len": UnboundedContinuous(1),
+            # "cost_laplacian": UnboundedContinuous((self.num_envs, 1)),
+            "cost_hausdorff": UnboundedContinuous(1),
+            "pos_error": UnboundedContinuous(1)
         }).expand(self.num_envs).to(self.device)
         self.observation_spec["stats"] = stats_spec
         self.stats = stats_spec.zero()

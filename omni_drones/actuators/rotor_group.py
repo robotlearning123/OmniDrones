@@ -51,16 +51,31 @@ class RotorGroup(nn.Module):
 
         self.requires_grad_(False)
 
-    def forward(self, cmds: torch.Tensor):
+    def forward(self, cmds: torch.Tensor, params=None):
+        if params is not None:
+            KF = params["KF"]
+            KM = params["KM"]
+            throttle = params["throttle"]
+            tau_up = params["tau_up"]
+            tau_down = params["tau_down"]
+            directions = params["directions"]
+        else:
+            KF = self.KF
+            KM = self.KM
+            throttle = self.throttle
+            tau_up = self.tau_up
+            tau_down = self.tau_down
+            directions = self.directions
+
         target_throttle = self.f_inv(torch.clamp((cmds + 1) / 2, 0, 1))
 
-        tau = torch.where(target_throttle > self.throttle, self.tau_up, self.tau_down)
+        tau = torch.where(target_throttle > throttle, tau_up, tau_down)
         tau = torch.clamp(tau, 0, 1)
-        self.throttle.add_(tau * (target_throttle - self.throttle))
+        throttle = throttle + tau * (target_throttle - throttle)
 
-        noise = torch.randn_like(self.throttle) * self.noise_scale * 0.
-        t = torch.clamp(self.f(self.throttle) + noise, 0., 1.)
-        thrusts = t * self.KF
-        moments = (t * self.KM) * -self.directions
+        noise = torch.randn_like(throttle) * self.noise_scale * 0.
+        t = torch.clamp(self.f(throttle) + noise, 0., 1.)
+        thrusts = t * KF
+        moments = (t * KM) * -directions
 
         return thrusts, moments
