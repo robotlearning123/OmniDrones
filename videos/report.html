@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>OmniDrones Tasks - Screenshot &amp; Video Report</title>
+<style>
+  :root { --bg:#0d1117; --card:#161b22; --bd:#30363d; --tx:#e6edf3; --tx2:#8b949e;
+          --ac:#58a6ff; --gr:#3fb950; --warn:#d29922; --err:#f85149; --purple:#bc8cff; }
+  * { box-sizing:border-box; margin:0; padding:0; }
+  body { font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;
+         background:var(--bg); color:var(--tx); line-height:1.6; }
+  .header { text-align:center; padding:48px 24px 32px; border-bottom:1px solid var(--bd); }
+  .header h1 { font-size:2em; margin-bottom:8px; }
+  .header .subtitle { color:var(--tx2); font-size:1.1em; }
+  .header .meta { color:var(--tx2); font-size:.85em; margin-top:12px; }
+  .badge { display:inline-block; padding:2px 10px; border-radius:12px; font-size:.8em; font-weight:600; }
+  .badge-pass { background:#1a3a2a; color:var(--gr); }
+  .badge-single { background:#1a2a3a; color:var(--ac); }
+  .badge-multi { background:#2a1a3a; color:var(--purple); }
+  .stats { display:flex; justify-content:center; gap:32px; margin:24px 0; flex-wrap:wrap; }
+  .stat { text-align:center; }
+  .stat .num { font-size:2.2em; font-weight:700; color:var(--gr); }
+  .stat .label { color:var(--tx2); font-size:.85em; }
+  .container { max-width:1400px; margin:0 auto; padding:24px; }
+  .grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(420px,1fr)); gap:24px; }
+  .card { background:var(--card); border:1px solid var(--bd); border-radius:12px; overflow:hidden;
+          transition:transform .15s,box-shadow .15s; }
+  .card:hover { transform:translateY(-2px); box-shadow:0 8px 24px rgba(0,0,0,.4); }
+  .card-media { position:relative; background:#000; aspect-ratio:4/3; }
+  .card-media img { width:100%; height:100%; object-fit:contain; cursor:pointer; }
+  .card-media video { display:none; width:100%; height:100%; object-fit:contain; }
+  .card-media.playing video { display:block; }
+  .card-media.playing img { display:none; }
+  .play-btn { position:absolute; bottom:12px; right:12px; background:rgba(0,0,0,.7); color:#fff;
+              border:1px solid var(--bd); border-radius:8px; padding:6px 14px; cursor:pointer;
+              font-size:.85em; z-index:2; }
+  .play-btn:hover { background:rgba(255,255,255,.15); }
+  .card-body { padding:16px 20px; }
+  .card-title { display:flex; align-items:center; gap:8px; margin-bottom:8px; }
+  .card-title h3 { font-size:1.1em; }
+  .card-desc { color:var(--tx2); font-size:.88em; margin-bottom:12px; min-height:2.8em; }
+  .review { background:rgba(63,185,80,.06); border:1px solid rgba(63,185,80,.2); border-radius:8px;
+            padding:10px 14px; font-size:.82em; }
+  .review .reviewer { color:var(--gr); font-weight:600; margin-bottom:4px; }
+  .review .verdict { color:var(--tx); }
+  .category-title { grid-column:1/-1; padding:20px 0 8px; border-bottom:1px solid var(--bd);
+                    margin-top:8px; }
+  .category-title h2 { font-size:1.3em; color:var(--ac); }
+  .category-title p { color:var(--tx2); font-size:.9em; }
+  .lightbox { display:none; position:fixed; inset:0; background:rgba(0,0,0,.9); z-index:1000;
+              justify-content:center; align-items:center; cursor:pointer; }
+  .lightbox.open { display:flex; }
+  .lightbox img, .lightbox video { max-width:95vw; max-height:95vh; border-radius:4px; }
+  footer { text-align:center; padding:32px; color:var(--tx2); font-size:.85em; border-top:1px solid var(--bd); margin-top:48px; }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>OmniDrones Task Gallery</h1>
+  <p class="subtitle">Isaac Sim 6.0 + Isaac Lab 3.0 &mdash; 20 RL Tasks for Multi-Rotor Drones</p>
+  <p class="meta">Screenshots &amp; videos rendered at 960&times;720 &middot; Reviewed by Kimi K2.6 (NVIDIA NIM) &middot; 2026-05-28</p>
+  <div class="stats">
+    <div class="stat"><div class="num">20</div><div class="label">Tasks</div></div>
+    <div class="stat"><div class="num">20/20</div><div class="label">Kimi K2.6 PASS</div></div>
+    <div class="stat"><div class="num">20</div><div class="label">Videos</div></div>
+  </div>
+</div>
+
+<div class="container">
+<div class="grid" id="gallery"></div>
+</div>
+
+<div class="lightbox" id="lightbox" onclick="closeLightbox()">
+  <img id="lb-img" src="">
+  <video id="lb-vid" controls style="display:none"></video>
+</div>
+
+<footer>
+  OmniDrones &copy; 2023 Botian Xu, Tsinghua University &middot; Isaac Sim 6.0 &middot; Report auto-generated
+</footer>
+
+<script>
+const TASKS = [
+  // ── Single-Agent Basic ──
+  { id:"Hover", cat:"Single-Agent", title:"Hover", agents:"single",
+    desc:"Maintain stable position and heading in mid-air without drifting. Basic control benchmark for UAV attitude hold.",
+    review:"PASS. Valid 3D rendering showing multiple drones in a grid formation on a blue grid-patterned ground plane. Scene is clearly visible with no corruption." },
+  { id:"FlyThrough", cat:"Single-Agent", title:"FlyThrough", agents:"single",
+    desc:"Fly the UAV through a moving gate. The gate shifts horizontally to random locations, requiring reactive trajectory planning.",
+    review:"PASS. Valid 3D rendering showing a drone in a FlyThrough task environment with gate obstacles and grid floor. Scene is clear and recognizable." },
+  { id:"Track", cat:"Single-Agent", title:"Track", agents:"single",
+    desc:"Track a reference lemniscate (figure-8) trajectory in 3D space. Tests precise multi-axis trajectory following.",
+    review:"PASS. A 3D drone simulation with grid floor, multiple drone models, and flight path visualization showing figure-8 trajectory patterns." },
+  { id:"Forest", cat:"Single-Agent", title:"Forest", agents:"single",
+    desc:"Navigate a randomly generated cluttered environment using LiDAR sensors (360&deg; horizontal FOV). Dark obstacle course with 40 random pillars.",
+    review:"PASS. Valid 3D rendering with cyan LiDAR rays clearly visible, dark obstacle silhouettes recognizable. Intentionally dark scene for LiDAR navigation task." },
+  { id:"Pinball", cat:"Single-Agent", title:"Pinball", agents:"single",
+    desc:"Catch and hit a ball to prevent it from falling. Advanced control task combining interception and active manipulation.",
+    review:"PASS. Valid 3D rendering showing multiple drones positioned over a blue grid ground plane with a visible ball target. Scene is clear and well-rendered." },
+
+  // ── Multi-Agent Formation ──
+  { id:"Formation", cat:"Multi-Agent Formation", title:"Formation", agents:"multi",
+    desc:"Control drones to form a regular polygon formation. Reward minimizes formation cost relative to target geometry.",
+    review:"PASS. Valid 3D rendering showing multiple drones in a formation pattern with blue grid ground. Drones and environment clearly visible." },
+  { id:"Rearrange", cat:"Multi-Agent Formation", title:"Rearrange", agents:"multi",
+    desc:"Multi-agent rearrangement task where drones must reposition to randomized target positions on an N&times;N grid.",
+    review:"PASS. Valid 3D rendering with multiple drones arranged in a grid pattern over a simulation ground plane. Clear and well-rendered scene." },
+
+  // ── Dragon (Bio-inspired) ──
+  { id:"DragonHover", cat:"Bio-Inspired (Dragon)", title:"DragonHover", agents:"single",
+    desc:"Hover task for the Dragon flapping-wing UAV model. Bio-inspired flight with membrane wing actuators instead of rotors.",
+    review:"PASS. Valid 3D rendering showing multiple Dragon drones in a grid-patterned environment. Distinctive flapping-wing morphology clearly visible." },
+
+  // ── Inverted Pendulum ──
+  { id:"InvPendulumHover", cat:"Inverted Pendulum", title:"InvPendulumHover", agents:"multi",
+    desc:"Balance a classic inverted pendulum on a UAV. The payload at the pendulum tip must stay at a target height while the drone maintains stability.",
+    review:"PASS. Valid 3D rendering showing multiple drones in an Isaac Sim environment with inverted pendulum payloads. Clear scene with recognizable drone structures." },
+  { id:"InvPendulumTrack", cat:"Inverted Pendulum", title:"InvPendulumTrack", agents:"multi",
+    desc:"Track a reference lemniscate trajectory with the pendulum payload. Requires coordinated drone movement while maintaining balance.",
+    review:"PASS. Valid 3D rendering showing multiple drones in an Isaac Sim environment tracking trajectories with pendulum attachments." },
+  { id:"InvPendulumFlyThrough", cat:"Inverted Pendulum", title:"InvPendulumFlyThrough", agents:"multi",
+    desc:"Fly through obstacles while balancing an inverted pendulum payload. Combines navigation precision with dynamic balance control.",
+    review:"PASS. Valid 3D rendering showing a drone simulation with coordinate frame gizmo, grid floor, and horizontal bar obstacles consistent with fly-through setup." },
+
+  // ── Payload ──
+  { id:"PayloadHover", cat:"Payload", title:"PayloadHover", agents:"multi",
+    desc:"Hover a spherical payload attached to the drone at a target position. Intermediate payload manipulation task.",
+    review:"PASS. Valid 3D rendering showing multiple drones in a grid formation with visible spherical payload attachments. Clear simulation scene." },
+  { id:"PayloadTrack", cat:"Payload", title:"PayloadTrack", agents:"multi",
+    desc:"Track a lemniscate trajectory while carrying a rigidly-attached spherical payload. Tests coordinated payload trajectory following.",
+    review:"PASS. Valid 3D rendering showing multiple drones in an Isaac Sim environment with payload attachments following trajectory paths." },
+  { id:"PayloadFlyThrough", cat:"Payload", title:"PayloadFlyThrough", agents:"multi",
+    desc:"Fly through obstacles while carrying a payload. Vertical obstacle gaps are tight, demanding precise altitude and attitude control.",
+    review:"PASS. Valid 3D rendering showing a drone with payload in Isaac Sim environment. Grid floor and obstacles clearly visible." },
+
+  // ── Platform (Cooperative Overactuated) ──
+  { id:"PlatformHover", cat:"Platform", title:"PlatformHover", agents:"multi",
+    desc:"Cooperative task where k UAVs are rigidly connected to form an overactuated platform. Hover the platform at a target pose.",
+    review:"PASS. Valid 3D rendering showing multiple drones in a grid formation forming a rigid platform structure. Clear cooperative simulation scene." },
+  { id:"PlatformTrack", cat:"Platform", title:"PlatformTrack", agents:"multi",
+    desc:"Track a reference trajectory with the rigid platform. Each UAV acts as a thrust generator within the connected frame.",
+    review:"PASS. Valid 3D rendering showing two drones in an Isaac Sim environment forming a connected platform tracking a trajectory." },
+  { id:"PlatformFlyThrough", cat:"Platform", title:"PlatformFlyThrough", agents:"multi",
+    desc:"Navigate the rigid platform through obstacle gaps. Demands coordinated multi-agent control of a large rigid body.",
+    review:"PASS. Valid 3D rendering showing a drone simulation scene with grid ground plane and obstacle structures. Platform configuration clearly visible." },
+
+  // ── Transport (Cooperative Box Carry) ──
+  { id:"TransportHover", cat:"Transport", title:"TransportHover", agents:"multi",
+    desc:"Cooperative transport: multiple UAVs carry a box-shaped payload via rigid links. Hover the box at a target position.",
+    review:"PASS. Valid 3D rendering showing a quadcopter drone with suspended box payload. Grid ground plane and transport configuration clearly visible." },
+  { id:"TransportTrack", cat:"Transport", title:"TransportTrack", agents:"multi",
+    desc:"Collectively track a reference trajectory while transporting a box payload. Tests multi-agent cooperative trajectory planning.",
+    review:"PASS. Valid 3D rendering showing a drone with box payload attached, navigating on a grid-patterned simulation floor." },
+  { id:"TransportFlyThrough", cat:"Transport", title:"TransportFlyThrough", agents:"multi",
+    desc:"Navigate through obstacles while cooperatively carrying a box payload. The most challenging transport variant.",
+    review:"PASS. Valid 3D rendering showing a multi-rotor drone with suspended payload navigating through obstacle structures." },
+];
+
+const gallery = document.getElementById('gallery');
+let lastCat = '';
+
+TASKS.forEach(t => {
+  if (t.cat !== lastCat) {
+    lastCat = t.cat;
+    const catDiv = document.createElement('div');
+    catDiv.className = 'category-title';
+    catDiv.innerHTML = `<h2>${t.cat}</h2>`;
+    gallery.appendChild(catDiv);
+  }
+
+  const card = document.createElement('div');
+  card.className = 'card';
+  card.innerHTML = `
+    <div class="card-media" id="media-${t.id}">
+      <img src="${t.id}.png" alt="${t.title}" loading="lazy" onclick="openLightbox('${t.id}','img')">
+      <video src="${t.id}.mp4" loop preload="metadata"></video>
+      <button class="play-btn" onclick="togglePlay(event,'${t.id}')">&#9654; Play Video</button>
+    </div>
+    <div class="card-body">
+      <div class="card-title">
+        <h3>${t.title}</h3>
+        <span class="badge ${t.agents==='single'?'badge-single':'badge-multi'}">${t.agents}</span>
+        <span class="badge badge-pass">PASS</span>
+      </div>
+      <p class="card-desc">${t.desc}</p>
+      <div class="review">
+        <div class="reviewer">Kimi K2.6 Review</div>
+        <div class="verdict">${t.review}</div>
+      </div>
+    </div>`;
+  gallery.appendChild(card);
+});
+
+function togglePlay(e, id) {
+  e.stopPropagation();
+  const media = document.getElementById('media-' + id);
+  const video = media.querySelector('video');
+  const btn = media.querySelector('.play-btn');
+  if (media.classList.contains('playing')) {
+    video.pause();
+    media.classList.remove('playing');
+    btn.innerHTML = '&#9654; Play Video';
+  } else {
+    media.classList.add('playing');
+    video.play();
+    btn.innerHTML = '&#9632; Show Screenshot';
+  }
+}
+
+function openLightbox(id, type) {
+  const lb = document.getElementById('lightbox');
+  const img = document.getElementById('lb-img');
+  const vid = document.getElementById('lb-vid');
+  if (type === 'img') {
+    img.src = id + '.png';
+    img.style.display = '';
+    vid.style.display = 'none';
+    vid.pause();
+  }
+  lb.classList.add('open');
+}
+
+function closeLightbox() {
+  const lb = document.getElementById('lightbox');
+  const vid = document.getElementById('lb-vid');
+  lb.classList.remove('open');
+  vid.pause();
+}
+
+document.addEventListener('keydown', e => { if (e.key === 'Escape') closeLightbox(); });
+</script>
+</body>
+</html>

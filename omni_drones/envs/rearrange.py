@@ -40,46 +40,62 @@ def sample_from_grid(cells: torch.Tensor, n):
 
 class Rearrange(IsaacEnv):
     def __init__(self, cfg, headless):
+        self.reward_distance_scale = cfg.task.reward_distance_scale
+        self.safe_distance = cfg.task.safe_distance
+        self.reward_share_ratio = cfg.task.reward_share_ratio
+
         super().__init__(cfg, headless)
-        self.reward_distance_scale = self.cfg.task.reward_distance_scale
-        self.safe_distance = self.cfg.task.safe_distance
-        self.reward_share_ratio = self.cfg.task.reward_share_ratio
 
         self.drone.initialize()
         self.init_poses = self.drone.get_world_poses(clone=True)
 
-        drone_state_dim = self.drone.state_spec.shape[0]
-        observation_spec = Composite({
-            "state_self": UnboundedContinuous((1, drone_state_dim)),
-            "state_others": UnboundedContinuous((self.drone.n-1, drone_state_dim+1)),
-        }).to(self.device)
-
-        state_spec = Composite({
-            "drones": UnboundedContinuous((self.drone.n, drone_state_dim))
-        }).to(self.device)
-
-        self.agent_spec["drone"] = AgentSpec(
-            "drone",
-            self.drone.n,
-            observation_spec,
-            self.drone.action_spec.to(self.device),
-            UnboundedContinuous(1).to(self.device),
-            state_spec,
-        )
-
         # initial state distribution
-        # self.target_pos = torch.tensor(self.num_envs, self.drone.n, 3, device=self.device)
         self.init_rpy_dist = D.Uniform(
             torch.tensor([-.2, -.2, 0.], device=self.device) * torch.pi,
             torch.tensor([0.2, 0.2, 2.], device=self.device) * torch.pi
         )
 
         self.alpha = 0.7
+
+    def _set_specs(self):
+        drone_state_dim = self.drone.state_spec.shape[0]
+        observation_spec = Composite({
+            "obs_self": UnboundedContinuous((1, drone_state_dim)),
+            "obs_others": UnboundedContinuous((self.drone.n-1, drone_state_dim+1)),
+        }).to(self.device)
+        observation_central_spec = Composite({
+            "drones": UnboundedContinuous((self.drone.n, drone_state_dim))
+        }).to(self.device)
+        self.observation_spec = Composite({
+            "agents": {
+                "observation": observation_spec.expand(self.drone.n),
+                "observation_central": observation_central_spec,
+            }
+        }).expand(self.num_envs).to(self.device)
+        self.action_spec = Composite({
+            "agents": {
+                "action": torch.stack([self.drone.action_spec] * self.drone.n, dim=0),
+            }
+        }).expand(self.num_envs).to(self.device)
+        self.reward_spec = Composite({
+            "agents": {
+                "reward": UnboundedContinuous((self.drone.n, 1))
+            }
+        }).expand(self.num_envs).to(self.device)
+        self.agent_spec["drone"] = AgentSpec(
+            "drone",
+            self.drone.n,
+            observation_key=("agents", "observation"),
+            action_key=("agents", "action"),
+            reward_key=("agents", "reward"),
+            state_key=("agents", "observation_central"),
+        )
         # additional infos & buffers
         stats_spec = Composite({
-            "pos_error": UnboundedContinuous(self.drone.n, 1),
-            "effort": UnboundedContinuous(self.drone.n, 1),
-            # "collision": UnboundedContinuous(1)
+            "return": UnboundedContinuous(self.drone.n),
+            "episode_len": UnboundedContinuous(1),
+            "pos_error": UnboundedContinuous(self.drone.n),
+            "effort": UnboundedContinuous(self.drone.n),
         }).expand(self.num_envs).to(self.device)
         self.observation_spec["stats"] = stats_spec
         self.stats = stats_spec.zero()
@@ -116,15 +132,15 @@ class Rearrange(IsaacEnv):
         vel = torch.zeros(len(env_ids), self.drone.n, 6, device=self.device)
         self.drone.set_velocities(vel, env_ids)
 
-        self.stats["pos_error"][env_ids] = 0
+        self.stats[env_ids] = 0.
 
     def _pre_sim_step(self, tensordict: TensorDictBase):
-        actions = tensordict[("action", "drone.action")]
+        actions = tensordict[("agents", "action")]
         self.effort = self.drone.apply_action(actions)
 
     def _compute_state_and_obs(self):
         self.drone_state = self.drone.get_state()
-        self.drone_pos = self.drone_state[..., :3]
+        self.drone_pos = self.drone.pos
         self.drone_up = self.drone_state[..., 16:19]
 
         self.target_drone_rpos = self.target_pos - self.drone_pos
@@ -132,12 +148,10 @@ class Rearrange(IsaacEnv):
         drone_rpos = vmap(off_diag)(drone_rpos)
         self.drone_pdist = torch.norm(drone_rpos, dim=-1, keepdim=True)
 
-        state_self = torch.cat([
-            self.target_drone_rpos,
-            self.drone_state[..., 3:],
-        ], dim=-1)
+        state_self = self.drone_state.clone()
+        state_self[..., :3] = self.target_drone_rpos
 
-        state_others = torch.cat([
+        obs_others = torch.cat([
             drone_rpos,
             self.drone_pdist,
             vmap(others)(self.drone_state[..., 3:])
@@ -145,8 +159,8 @@ class Rearrange(IsaacEnv):
 
         obs = TensorDict(
             {
-                "state_self": state_self.unsqueeze(2),
-                "state_others": state_others,
+                "obs_self": state_self.unsqueeze(2),
+                "obs_others": obs_others,
             },
             [self.num_envs, self.drone.n],
         )
@@ -156,11 +170,14 @@ class Rearrange(IsaacEnv):
         }, self.batch_size)
 
         self.stats["pos_error"].lerp_(self.target_drone_rpos.norm(dim=-1), 1-self.alpha)
-        # self.stats
+        self.stats["episode_len"][:] = self.progress_buf.unsqueeze(-1)
+
         return TensorDict(
             {
-                "drone.obs": obs,
-                "drone.state": state,
+                "agents": {
+                    "observation": obs,
+                    "observation_central": state,
+                },
                 "stats": self.stats.clone(),
             },
             self.batch_size,
@@ -179,11 +196,12 @@ class Rearrange(IsaacEnv):
         safety_reward = torch.square(separation / self.safe_distance).clamp(0, 1)
 
         reward = safety_reward * (
-            pos_reward + pos_reward * (up_reward + spin_reward)
+            pos_reward + pos_reward * (up_reward + reward_spin)
         )
         reward = reward.lerp(reward.mean(1, keepdim=True), self.reward_share_ratio)
 
-        self._tensordict["return"] += reward
+        self.stats["return"].add_(reward.squeeze(-1))
+        self.stats["episode_len"][:] = self.progress_buf.unsqueeze(-1)
 
         misbehave = ((pos[..., 2].unsqueeze(-1) < 0.2) | (distance > 5.0)).any(1)
         hasnan = torch.isnan(self.drone_state).any(-1)
@@ -193,10 +211,9 @@ class Rearrange(IsaacEnv):
 
         return TensorDict(
             {
-                "reward": {
-                    "drone.reward": reward,
+                "agents": {
+                    "reward": reward,
                 },
-                "return": self._tensordict["return"],
                 "done": terminated | truncated,
                 "terminated": terminated,
                 "truncated": truncated,

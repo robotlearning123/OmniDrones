@@ -36,10 +36,11 @@ class HAPPOPolicy(MAPPOPolicy):
         actor_params = self.actor_params[agent_id]
 
         log_probs_old = batch[self.act_logps_name]
-        actor_output = self.actor(actor_input, actor_params, eval_action=True)
+        with actor_params.to_module(self.actor):
+            actor_output = self.actor(actor_input)
 
         log_probs_new = actor_output[self.act_logps_name]
-        dist_entropy = actor_output[f"{self.agent_spec.name}.action_entropy"]
+        dist_entropy = actor_output[(self.agent_name, "action_entropy")]
 
         assert advantages.shape == log_probs_new.shape == dist_entropy.shape
 
@@ -74,7 +75,9 @@ class HAPPOPolicy(MAPPOPolicy):
         with torch.no_grad():
             value_output = self.value_op(next_tensordict)
 
-        rewards = tensordict.get(("next", "reward", f"{self.agent_spec.name}.reward"))
+        rewards = tensordict.get(("next", "agents", "reward"))
+        if rewards is None:
+            rewards = tensordict.get(("next", "reward", (self.agent_name, "reward")))
         if rewards.shape[-1] != 1:
             rewards = rewards.sum(-1, keepdim=True)
 
@@ -120,10 +123,10 @@ class HAPPOPolicy(MAPPOPolicy):
             for minibatch in dataset:
                 factor = torch.ones(minibatch[self.act_logps_name].shape[0], 1, device=minibatch.device)
                 actor_batch = minibatch.select(*self.actor_in_keys, "advantages", self.act_logps_name)
-                actor_batch.batch_size = [*minibatch.shape, self.agent_spec.n]
+                actor_batch.batch_size = [*minibatch.shape, self.num_agents]
                 critic_batch = minibatch.select(*self.critic_in_keys, "returns", "state_value")
                 agent_info = []
-                for agent_id in torch.randperm(self.agent_spec.n):
+                for agent_id in torch.randperm(self.num_agents):
                     info, factor = self.update_actor(actor_batch[:, agent_id], factor, agent_id.item())
                     agent_info.append(info)
                 {}
@@ -141,4 +144,4 @@ class HAPPOPolicy(MAPPOPolicy):
         if hasattr(self, "value_normalizer"):
             train_info["value_running_mean"] = self.value_normalizer.running_mean.mean()
 
-        return {f"{self.agent_spec.name}/{k}": v for k, v in train_info.items()}
+        return {f"{self.agent_name}/{k}": v for k, v in train_info.items()}

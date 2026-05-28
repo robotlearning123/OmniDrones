@@ -40,7 +40,6 @@ from torchrl.objectives.utils import hold_out_net
 
 import copy
 from tqdm import tqdm
-from omni_drones.utils.torchrl import AgentSpec
 from tensordict import TensorDict
 from .common import soft_update
 
@@ -48,12 +47,30 @@ class SACPolicy(object):
 
     def __init__(self,
         cfg,
-        agent_spec: AgentSpec,
-        device: str="cuda",
+        observation_spec,
+        action_spec,
+        reward_spec,
+        device,
     ) -> None:
         self.cfg = cfg
-        self.agent_spec = agent_spec
         self.device = device
+
+        # torchrl 0.12+ returns Composite; extract the inner specs
+        if isinstance(action_spec, Composite) and ("agents", "action") in action_spec.keys(True, True):
+            action_spec = action_spec["agents", "action"]
+        elif isinstance(action_spec, Composite) and "action" in action_spec.keys():
+            action_spec = action_spec["action"]
+        if isinstance(reward_spec, Composite) and ("agents", "reward") in reward_spec.keys(True, True):
+            reward_spec = reward_spec["agents", "reward"]
+        elif isinstance(reward_spec, Composite) and "reward" in reward_spec.keys():
+            reward_spec = reward_spec["reward"]
+
+        self.observation_spec = observation_spec
+        self.action_spec = action_spec
+        self.reward_spec = reward_spec
+        self.num_agents = action_spec.shape[-2]
+        self.action_dim = action_spec.shape[-1]
+        self.agent_name = "agents"
 
         self.gradient_steps = int(cfg.gradient_steps)
         self.buffer_size = int(cfg.buffer_size)
@@ -65,8 +82,6 @@ class SACPolicy(object):
 
         self.make_actor()
         self.make_critic()
-
-        self.action_dim = self.agent_spec.action_spec.shape[-1]
         self.target_entropy = - torch.tensor(self.action_dim, device=self.device)
         init_entropy = 1.0
         self.log_alpha = nn.Parameter(torch.tensor(init_entropy, device=self.device).log())
@@ -81,14 +96,22 @@ class SACPolicy(object):
     def make_actor(self):
 
         self.policy_in_keys = [self.obs_name]
-        self.policy_out_keys = [self.act_name, f"{self.agent_spec.name}.logp"]
+        self.policy_out_keys = [self.act_name, (self.agent_name, "logp")]
+
+        # Extract inner observation spec for actor
+        obs_spec = self.observation_spec
+        if isinstance(obs_spec, Composite):
+            if ("agents", "observation") in obs_spec.keys(True, True):
+                obs_spec = obs_spec["agents", "observation"]
+            elif "observation" in obs_spec.keys():
+                obs_spec = obs_spec["observation"]
 
         if self.cfg.share_actor:
             self.actor = TensorDictModule(
                 Actor(
                     self.cfg.actor,
-                    self.agent_spec.observation_spec,
-                    self.agent_spec.action_spec
+                    obs_spec,
+                    self.action_spec
                 ),
                 in_keys=self.policy_in_keys, out_keys=self.policy_out_keys
             ).to(self.device)
@@ -99,23 +122,30 @@ class SACPolicy(object):
 
     def make_critic(self):
         self.value_in_keys = [self.obs_name, self.act_name]
-        self.value_out_keys = [f"{self.agent_spec.name}.q"]
+        self.value_out_keys = [(self.agent_name, "q")]
+
+        # Extract inner observation spec for critic
+        obs_spec = self.observation_spec
+        if isinstance(obs_spec, Composite):
+            if ("agents", "observation") in obs_spec.keys(True, True):
+                obs_spec = obs_spec["agents", "observation"]
+            elif "observation" in obs_spec.keys():
+                obs_spec = obs_spec["observation"]
 
         self.critic = Critic(
             self.cfg.critic,
             1,
-            self.agent_spec.observation_spec,
-            self.agent_spec.action_spec
+            obs_spec,
+            self.action_spec
         ).to(self.device)
 
         self.critic_target = copy.deepcopy(self.critic)
         self.critic_opt = torch.optim.Adam(self.critic.parameters(), lr=self.cfg.critic.lr)
         self.critic_loss_fn = {"mse": F.mse_loss, "smooth_l1": F.smooth_l1_loss}[self.cfg.critic_loss]
 
-    def __call__(self, tensordict: TensorDict, deterministic: bool=False) -> TensorDict:
-        # return tensordict.update({self.act_name: self.agent_spec.action_spec.zero()})
+    def __call__(self, tensordict: TensorDict) -> TensorDict:
         actor_input = tensordict.select(*self.policy_in_keys)
-        actor_input.batch_size = [*actor_input.batch_size, self.agent_spec.n]
+        actor_input.batch_size = [*actor_input.batch_size, self.num_agents]
         actor_output = self.actor(actor_input)
         tensordict.update(actor_output)
         return tensordict
@@ -146,7 +176,7 @@ class SACPolicy(object):
             with torch.no_grad():
                 actor_output = self.actor(transition["next"], deterministic=False)
                 next_act = actor_output[self.act_name]
-                next_logp = actor_output[f"{self.agent_spec.name}.logp"]
+                next_logp = actor_output[(self.agent_name, "logp")]
                 next_qs = self.critic_target(next_state, next_act)
                 next_q = torch.min(next_qs, dim=-1, keepdim=True).values
                 next_q = next_q - self.log_alpha.exp() * next_logp
@@ -171,7 +201,7 @@ class SACPolicy(object):
                 with hold_out_net(self.critic):
                     actor_output = self.actor(transition, deterministic=False)
                     act = actor_output[self.act_name]
-                    logp = actor_output[f"{self.agent_spec.name}.logp"]
+                    logp = actor_output[(self.agent_name, "logp")]
 
                     qs = self.critic(state, act)
                     q = torch.min(qs, dim=-1).values

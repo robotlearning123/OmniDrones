@@ -42,8 +42,6 @@ from torchrl.data import (
     UnboundedContinuous as UnboundedTensorSpec,
 )
 
-from omni_drones.utils.torchrl.env import AgentSpec
-
 from .utils import valuenorm
 from .utils.gae import compute_gae
 
@@ -52,16 +50,39 @@ LR_SCHEDULER = lr_scheduler._LRScheduler
 
 class MAPPOPolicy(object):
     def __init__(
-        self, cfg, agent_spec: AgentSpec, device="cuda"
+        self, cfg, observation_spec, action_spec, reward_spec, device
     ) -> None:
         super().__init__()
 
         self.cfg = cfg
-        self.agent_spec = agent_spec
         self.device = device
 
-        print(self.agent_spec.observation_spec)
-        print(self.agent_spec.action_spec)
+        # torchrl 0.12+ returns Composite; extract the inner specs
+        if isinstance(action_spec, Composite) and ("agents", "action") in action_spec.keys(True, True):
+            action_spec = action_spec["agents", "action"]
+        elif isinstance(action_spec, Composite) and "action" in action_spec.keys():
+            action_spec = action_spec["action"]
+        if isinstance(reward_spec, Composite) and ("agents", "reward") in reward_spec.keys(True, True):
+            reward_spec = reward_spec["agents", "reward"]
+        elif isinstance(reward_spec, Composite) and "reward" in reward_spec.keys():
+            reward_spec = reward_spec["reward"]
+
+        self.observation_spec = observation_spec
+        self.action_spec = action_spec
+        self.reward_spec = reward_spec
+        self.num_agents = action_spec.shape[-2]
+        self.act_dim = action_spec.shape[-1]
+        self.agent_name = "agents"
+
+        # Check if central observation exists for critic
+        self.has_state = False
+        if isinstance(observation_spec, Composite):
+            if ("agents", "observation_central") in observation_spec.keys(True, True):
+                self.has_state = True
+                self.state_spec = observation_spec["agents", "observation_central"]
+            elif "observation_central" in observation_spec.keys():
+                self.has_state = True
+                self.state_spec = observation_spec["observation_central"]
 
         self.clip_param = cfg.clip_param
         self.ppo_epoch = int(cfg.ppo_epochs)
@@ -72,13 +93,11 @@ class MAPPOPolicy(object):
         self.gae_gamma = cfg.gamma
         self.gae_lambda = cfg.gae_lambda
 
-        self.act_dim = agent_spec.action_spec.shape[-1]
-
         if cfg.reward_weights is not None:
             self.reward_weights = torch.as_tensor(cfg.reward_weights, device=device).float()
         else:
             self.reward_weights = torch.ones(
-                self.agent_spec.reward_spec.shape, device=device
+                self.reward_spec.shape, device=device
             )
 
         self.obs_name = ("agents", "observation")
@@ -108,21 +127,29 @@ class MAPPOPolicy(object):
 
     @property
     def act_logps_name(self):
-        return f"{self.agent_spec.name}.action_logp"
+        return (self.agent_name, "action_logp")
 
     def make_actor(self):
         cfg = self.cfg.actor
+
+        # Extract inner observation spec for actor
+        obs_spec = self.observation_spec
+        if isinstance(obs_spec, Composite):
+            if ("agents", "observation") in obs_spec.keys(True, True):
+                obs_spec = obs_spec["agents", "observation"]
+            elif "observation" in obs_spec.keys():
+                obs_spec = obs_spec["observation"]
 
         self.actor_in_keys = [self.obs_name, self.act_name]
         self.actor_out_keys = [
             self.act_name,
             self.act_logps_name,
-            f"{self.agent_spec.name}.action_entropy",
+            (self.agent_name, "action_entropy"),
         ]
 
         create_actor_fn = lambda: TensorDictModule(
             make_ppo_actor(
-                cfg, self.agent_spec.observation_spec, self.agent_spec.action_spec
+                cfg, obs_spec, self.action_spec
             ),
             in_keys=self.actor_in_keys,
             out_keys=self.actor_out_keys
@@ -132,7 +159,7 @@ class MAPPOPolicy(object):
             self.actor = create_actor_fn()
             self.actor_params = TensorDictParams(TensorDict.from_module(self.actor))
         else:
-            actors = nn.ModuleList([create_actor_fn() for _ in range(self.agent_spec.n)])
+            actors = nn.ModuleList([create_actor_fn() for _ in range(self.num_agents)])
             self.actor = actors[0]
             stacked_params = torch.stack([TensorDict.from_module(actor) for actor in actors])
             self.actor_params = TensorDictParams(stacked_params.to_tensordict())
@@ -147,13 +174,21 @@ class MAPPOPolicy(object):
         else:
             self.critic_loss_fn = nn.MSELoss()
 
+        # Extract inner observation spec for critic
+        obs_spec = self.observation_spec
+        if isinstance(obs_spec, Composite):
+            if ("agents", "observation") in obs_spec.keys(True, True):
+                obs_spec = obs_spec["agents", "observation"]
+            elif "observation" in obs_spec.keys():
+                obs_spec = obs_spec["observation"]
+
         assert self.cfg.critic_input in ("state", "obs")
-        if self.cfg.critic_input == "state" and self.agent_spec.state_spec is not None:
+        if self.cfg.critic_input == "state" and self.has_state:
             self.critic_in_keys = ["state"]
             self.critic_out_keys = ["state_value"]
-            reward_spec = self.agent_spec.reward_spec
-            reward_spec = reward_spec.expand(self.agent_spec.n, *reward_spec.shape)
-            critic = make_critic(cfg, self.agent_spec.state_spec, reward_spec, centralized=True)
+            reward_spec = self.reward_spec
+            reward_spec = reward_spec.expand(self.num_agents, *reward_spec.shape)
+            critic = make_critic(cfg, self.state_spec, reward_spec, centralized=True)
             self.critic = TensorDictModule(
                 critic,
                 in_keys=self.critic_in_keys,
@@ -163,7 +198,7 @@ class MAPPOPolicy(object):
         else:
             self.critic_in_keys = [self.obs_name]
             self.critic_out_keys = ["state_value"]
-            critic = make_critic(cfg, self.agent_spec.observation_spec, self.agent_spec.reward_spec, centralized=False)
+            critic = make_critic(cfg, obs_spec, self.reward_spec, centralized=False)
             self.critic = TensorDictModule(
                 critic,
                 in_keys=self.critic_in_keys,
@@ -189,22 +224,26 @@ class MAPPOPolicy(object):
             # Empirically the performance is similar on most of the tasks.
             cls = getattr(valuenorm, cfg.value_norm["class"])
             self.value_normalizer: valuenorm.Normalizer = cls(
-                input_shape=self.agent_spec.reward_spec.shape[-2:],
+                input_shape=self.reward_spec.shape[-2:],
                 **cfg.value_norm["kwargs"],
             ).to(self.device)
 
     def value_op(self, tensordict: TensorDict) -> TensorDict:
         critic_input = tensordict.select(*self.critic_in_keys, strict=False)
         if self.cfg.critic_input == "obs":
-            critic_input.batch_size = [*critic_input.batch_size, self.agent_spec.n]
+            critic_input.batch_size = [*critic_input.batch_size, self.num_agents]
         tensordict = self.value_func(critic_input)
         return tensordict
 
-    def __call__(self, tensordict: TensorDict, deterministic: bool = False):
+    def _actor_with_params(self, input_td, params):
+        with params.to_module(self.actor):
+            return self.actor(input_td)
+
+    def __call__(self, tensordict: TensorDict):
         actor_input = tensordict.select(*self.actor_in_keys, strict=False)
-        actor_input.batch_size = [*actor_input.batch_size, self.agent_spec.n]
-        actor_output = vmap(self.actor, in_dims=(1, 0), out_dims=1, randomness="different")(
-            actor_input, self.actor_params, deterministic=deterministic
+        actor_input.batch_size = [*actor_input.batch_size, self.num_agents]
+        actor_output = vmap(self._actor_with_params, in_dims=(1, 0), out_dims=1, randomness="different")(
+            actor_input, self.actor_params
         )
 
         tensordict.update(actor_output)
@@ -214,15 +253,15 @@ class MAPPOPolicy(object):
     def update_actor(self, batch: TensorDict) -> Dict[str, Any]:
         advantages = batch["advantages"]
         actor_input = batch.select(*self.actor_in_keys)
-        actor_input.batch_size = [*actor_input.batch_size, self.agent_spec.n]
+        actor_input.batch_size = [*actor_input.batch_size, self.num_agents]
 
         log_probs_old = batch[self.act_logps_name]
-        actor_output = vmap(self.actor, in_dims=(1, 0), out_dims=1)(
-            actor_input, self.actor_params, eval_action=True
+        actor_output = vmap(self._actor_with_params, in_dims=(1, 0), out_dims=1)(
+            actor_input, self.actor_params
         )
 
         log_probs_new = actor_output[self.act_logps_name]
-        dist_entropy = actor_output[f"{self.agent_spec.name}.action_entropy"]
+        dist_entropy = actor_output[(self.agent_name, "action_entropy")]
 
         assert advantages.shape == log_probs_new.shape == dist_entropy.shape
 
@@ -281,8 +320,8 @@ class MAPPOPolicy(object):
     def _get_dones(self, tensordict: TensorDict):
         env_done = tensordict[("next", "done")].unsqueeze(-1)
         agent_done = tensordict.get(
-            ("next", f"{self.agent_spec.name}.done"),
-            env_done.expand(*env_done.shape[:-2], self.agent_spec.n, 1),
+            ("next", self.agent_name, "done"),
+            env_done.expand(*env_done.shape[:-2], self.num_agents, 1),
         )
         done = agent_done | env_done
         return done
@@ -349,13 +388,13 @@ class MAPPOPolicy(object):
         train_info = {k: v.mean().item() for k, v in torch.stack(train_info).items()}
         train_info["advantages_mean"] = advantages_mean.item()
         train_info["advantages_std"] = advantages_std.item()
-        if isinstance(self.agent_spec.action_spec, (Bounded, UnboundedTensorSpec)):
+        if isinstance(self.action_spec, (Bounded, UnboundedTensorSpec)):
             train_info["action_norm"] = tensordict[self.act_name].norm(dim=-1).mean().item()
         if hasattr(self, "value_normalizer"):
             train_info["value_running_mean"] = self.value_normalizer.running_mean.mean().item()
 
         self.n_updates += 1
-        return {f"{self.agent_spec.name}/{k}": v for k, v in train_info.items()}
+        return {f"{self.agent_name}/{k}": v for k, v in train_info.items()}
 
     def state_dict(self):
         state_dict = {
@@ -423,7 +462,12 @@ def make_ppo_actor(cfg, observation_spec: TensorSpec, action_spec: TensorSpec):
 
 
 def make_critic(cfg, state_spec: TensorSpec, reward_spec: TensorSpec, centralized=False):
-    assert isinstance(reward_spec, (UnboundedTensorSpec, Bounded))
+    # Extract inner spec if Composite
+    if isinstance(reward_spec, Composite):
+        if ("agents", "reward") in reward_spec.keys(True, True):
+            reward_spec = reward_spec["agents", "reward"]
+        elif "reward" in reward_spec.keys():
+            reward_spec = reward_spec["reward"]
     encoder = make_encoder(cfg, state_spec)
 
     if centralized:
@@ -450,18 +494,18 @@ class Actor(nn.Module):
         self,
         obs: Union[torch.Tensor, TensorDict],
         action: torch.Tensor = None,
-        deterministic=False,
-        eval_action=False
     ):
         actor_features = self.encoder(obs)
         action_dist = self.act_dist(actor_features)
 
-        if eval_action:
+        if action is not None:
+            # eval mode: use provided action
             action_log_probs = action_dist.log_prob(action).unsqueeze(-1)
             dist_entropy = action_dist.entropy().unsqueeze(-1)
             return action, action_log_probs, dist_entropy
         else:
-            action = action_dist.mode if deterministic else action_dist.sample()
+            # collect mode: sample action
+            action = action_dist.sample()
             action_log_probs = action_dist.log_prob(action).unsqueeze(-1)
             dist_entropy = action_dist.entropy().unsqueeze(-1)
             return action, action_log_probs, dist_entropy

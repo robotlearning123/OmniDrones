@@ -146,7 +146,17 @@ ok1 = run_test("ppo", "Hover", "cfg/task/Hover.yaml", "cfg/algo/mappo.yaml")
 # Test MAPPO on Formation (multi-agent)
 ok2 = run_test("mappo", "Formation", "cfg/task/Formation.yaml", "cfg/algo/mappo.yaml", ravel_obs=True)
 
-if ok1 and ok2:
+# Test SAC on Hover (off-policy, single-agent task)
+ok3 = run_test("sac", "Hover", "cfg/task/Hover.yaml", "cfg/algo/sac.yaml")
+
+# Test TD3 on Hover (off-policy, single-agent task)
+ok4 = run_test("td3", "Hover", "cfg/task/Hover.yaml", "cfg/algo/td3.yaml")
+
+# Test HAPPO on Formation (multi-agent)
+ok5 = run_test("happo", "Formation", "cfg/task/Formation.yaml", "cfg/algo/happo.yaml", ravel_obs=True)
+
+all_ok = ok1 and ok2 and ok3 and ok4 and ok5
+if all_ok:
     sys.stderr.write("\nAll training pipeline tests PASSED\n")
     sys.stderr.flush()
     sys.exit(0)

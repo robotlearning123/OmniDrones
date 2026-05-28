@@ -40,7 +40,6 @@ from torchrl.objectives.utils import hold_out_net
 
 import copy
 from tqdm import tqdm
-from omni_drones.utils.torchrl import AgentSpec
 from tensordict import TensorDict
 from .common import soft_update
 
@@ -48,12 +47,30 @@ class TD3Policy(object):
 
     def __init__(self,
         cfg,
-        agent_spec: AgentSpec,
-        device: str="cuda",
+        observation_spec,
+        action_spec,
+        reward_spec,
+        device,
     ) -> None:
         self.cfg = cfg
-        self.agent_spec = agent_spec
         self.device = device
+
+        # torchrl 0.12+ returns Composite; extract the inner specs
+        if isinstance(action_spec, Composite) and ("agents", "action") in action_spec.keys(True, True):
+            action_spec = action_spec["agents", "action"]
+        elif isinstance(action_spec, Composite) and "action" in action_spec.keys():
+            action_spec = action_spec["action"]
+        if isinstance(reward_spec, Composite) and ("agents", "reward") in reward_spec.keys(True, True):
+            reward_spec = reward_spec["agents", "reward"]
+        elif isinstance(reward_spec, Composite) and "reward" in reward_spec.keys():
+            reward_spec = reward_spec["reward"]
+
+        self.observation_spec = observation_spec
+        self.action_spec = action_spec
+        self.reward_spec = reward_spec
+        self.num_agents = action_spec.shape[-2]
+        self.action_dim = action_spec.shape[-1]
+        self.agent_name = "agents"
 
         self.gradient_steps = int(cfg.gradient_steps)
         self.batch_size = int(cfg.batch_size)
@@ -67,7 +84,6 @@ class TD3Policy(object):
         self.act_name = ("agents", "action")
         self.reward_name = ("agents", "reward")
 
-        self.action_dim = self.agent_spec.action_spec.shape[-1]
         self.make_model()
 
         self.replay_buffer = TensorDictReplayBuffer(
@@ -79,9 +95,17 @@ class TD3Policy(object):
     def make_model(self):
 
         self.policy_in_keys = [self.obs_name]
-        self.policy_out_keys = [self.act_name, f"{self.agent_spec.name}.logp"]
+        self.policy_out_keys = [self.act_name]
 
-        encoder = make_encoder(self.cfg.actor, self.agent_spec.observation_spec)
+        # Extract inner observation spec for encoder
+        obs_spec = self.observation_spec
+        if isinstance(obs_spec, Composite):
+            if ("agents", "observation") in obs_spec.keys(True, True):
+                obs_spec = obs_spec["agents", "observation"]
+            elif "observation" in obs_spec.keys():
+                obs_spec = obs_spec["observation"]
+
+        encoder = make_encoder(self.cfg.actor, obs_spec)
         self.actor = TensorDictModule(
             nn.Sequential(
                 encoder,
@@ -94,22 +118,22 @@ class TD3Policy(object):
         self.actor_opt = torch.optim.Adam(self.actor.parameters(), lr=self.cfg.actor.lr)
 
         self.value_in_keys = [self.obs_name, self.act_name]
-        self.value_out_keys = [f"{self.agent_spec.name}.q"]
+        self.value_out_keys = [(self.agent_name, "q")]
 
         self.critic = Critic(
             self.cfg.critic,
             1,
-            self.agent_spec.observation_spec,
-            self.agent_spec.action_spec
+            obs_spec,
+            self.action_spec
         ).to(self.device)
 
         self.critic_target = copy.deepcopy(self.critic)
         self.critic_opt = torch.optim.Adam(self.critic.parameters(), lr=self.cfg.critic.lr)
         self.critic_loss_fn = {"mse":F.mse_loss, "smooth_l1": F.smooth_l1_loss}[self.cfg.critic_loss]
 
-    def __call__(self, tensordict: TensorDict, deterministic: bool=False) -> TensorDict:
+    def __call__(self, tensordict: TensorDict) -> TensorDict:
         actor_input = tensordict.select(*self.policy_in_keys)
-        actor_input.batch_size = [*actor_input.batch_size, self.agent_spec.n]
+        actor_input.batch_size = [*actor_input.batch_size, self.num_agents]
         actor_output = self.actor(actor_input)
         action_noise = (
             actor_output[self.act_name]

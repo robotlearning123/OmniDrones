@@ -41,19 +41,46 @@ from torchrl.objectives.utils import hold_out_net
 
 import copy
 from tqdm import tqdm
-from omni_drones.utils.torchrl import AgentSpec
 from .common import soft_update
 
 class MATD3Policy(object):
 
     def __init__(self,
         cfg,
-        agent_spec: AgentSpec,
-        device: str="cuda",
+        observation_spec,
+        action_spec,
+        reward_spec,
+        device,
     ) -> None:
         self.cfg = cfg
-        self.agent_spec = agent_spec
         self.device = device
+
+        # torchrl 0.12+ returns Composite; extract the inner specs
+        if isinstance(action_spec, Composite) and ("agents", "action") in action_spec.keys(True, True):
+            action_spec = action_spec["agents", "action"]
+        elif isinstance(action_spec, Composite) and "action" in action_spec.keys():
+            action_spec = action_spec["action"]
+        if isinstance(reward_spec, Composite) and ("agents", "reward") in reward_spec.keys(True, True):
+            reward_spec = reward_spec["agents", "reward"]
+        elif isinstance(reward_spec, Composite) and "reward" in reward_spec.keys():
+            reward_spec = reward_spec["reward"]
+
+        self.observation_spec = observation_spec
+        self.action_spec = action_spec
+        self.reward_spec = reward_spec
+        self.num_agents = action_spec.shape[-2]
+        self.action_dim = action_spec.shape[-1]
+        self.agent_name = "agents"
+
+        # Check if central observation exists
+        self.has_state = False
+        if isinstance(observation_spec, Composite):
+            if ("agents", "observation_central") in observation_spec.keys(True, True):
+                self.has_state = True
+                self.state_spec = observation_spec["agents", "observation_central"]
+            elif "observation_central" in observation_spec.keys():
+                self.has_state = True
+                self.state_spec = observation_spec["observation_central"]
 
         self.gradient_steps = int(cfg.gradient_steps)
         self.batch_size = int(cfg.batch_size)
@@ -63,15 +90,11 @@ class MATD3Policy(object):
         self.policy_noise = self.cfg.policy_noise
         self.noise_clip = self.cfg.noise_clip
 
-        self.obs_name = f"{self.agent_spec.name}.obs"
-        self.act_name = ("action", f"{self.agent_spec.name}.action")
-        if agent_spec.state_spec is not None:
-            self.state_name = f"{self.agent_spec.name}.state"
-        else:
-            self.state_name = f"{self.agent_spec.name}.obs"
-        self.reward_name = f"{self.agent_spec.name}.reward"
+        self.obs_name = ("agents", "observation")
+        self.act_name = ("agents", "action")
+        self.reward_name = ("agents", "reward")
+        self.state_name = ("agents", "observation_central") if self.has_state else ("agents", "observation")
 
-        self.action_dim = self.agent_spec.action_spec.shape[-1]
         self.make_model()
 
         self.replay_buffer = TensorDictReplayBuffer(
@@ -83,10 +106,18 @@ class MATD3Policy(object):
     def make_model(self):
 
         self.policy_in_keys = [self.obs_name]
-        self.policy_out_keys = [self.act_name, f"{self.agent_spec.name}.logp"]
+        self.policy_out_keys = [self.act_name, (self.agent_name, "logp")]
+
+        # Extract inner observation spec for actor
+        obs_spec = self.observation_spec
+        if isinstance(obs_spec, Composite):
+            if ("agents", "observation") in obs_spec.keys(True, True):
+                obs_spec = obs_spec["agents", "observation"]
+            elif "observation" in obs_spec.keys():
+                obs_spec = obs_spec["observation"]
 
         def create_actor():
-            encoder = make_encoder(self.cfg.actor, self.agent_spec.observation_spec)
+            encoder = make_encoder(self.cfg.actor, obs_spec)
             return TensorDictModule(
                 nn.Sequential(
                     encoder,
@@ -101,41 +132,33 @@ class MATD3Policy(object):
         if self.cfg.share_actor:
             self.actor = create_actor()
             self.actor_opt = torch.optim.Adam(self.actor.parameters(), lr=self.cfg.actor.lr)
-            self.actor_params = TensorDict.from_module(self.actor).expand(self.agent_spec.n)
+            self.actor_params = TensorDict.from_module(self.actor).expand(self.num_agents)
             self.actor_target_params = self.actor_params.clone()
         else:
-            actors = nn.ModuleList([create_actor() for _ in range(self.agent_spec.n)])
+            actors = nn.ModuleList([create_actor() for _ in range(self.num_agents)])
             self.actor = actors[0]
             self.actor_opt = torch.optim.Adam(actors.parameters(), lr=self.cfg.actor.lr)
             self.actor_params = torch.stack([TensorDict.from_module(actor) for actor in actors])
             self.actor_target_params = self.actor_params.clone()
 
-        if self.agent_spec.state_spec is not None:
-            self.value_in_keys = [self.state_name, self.act_name]
-            self.value_out_keys = [f"{self.agent_spec.name}.q"]
+        # Extract inner spec for critic
+        critic_obs_spec = self.state_spec if self.has_state else obs_spec
 
-            self.critic = Critic(
-                self.cfg.critic,
-                self.agent_spec.n,
-                self.agent_spec.state_spec,
-                self.agent_spec.action_spec
-            ).to(self.device)
-        else:
-            self.value_in_keys = [self.obs_name, self.act_name]
-            self.value_out_keys = [f"{self.agent_spec.name}.q"]
+        self.value_in_keys = [self.state_name, self.act_name] if self.has_state else [self.obs_name, self.act_name]
+        self.value_out_keys = [(self.agent_name, "q")]
 
-            self.critic = Critic(
-                self.cfg.critic,
-                self.agent_spec.n,
-                self.agent_spec.observation_spec,
-                self.agent_spec.action_spec
-            ).to(self.device)
+        self.critic = Critic(
+            self.cfg.critic,
+            self.num_agents,
+            critic_obs_spec,
+            self.action_spec
+        ).to(self.device)
 
         self.critic_target = copy.deepcopy(self.critic)
         self.critic_opt = torch.optim.Adam(self.critic.parameters(), lr=self.cfg.critic.lr)
         self.critic_loss_fn = {"mse": F.mse_loss, "smooth_l1": F.smooth_l1_loss}[self.cfg.critic_loss]
 
-    def __call__(self, tensordict: TensorDict, deterministic: bool=False) -> TensorDict:
+    def __call__(self, tensordict: TensorDict) -> TensorDict:
         actor_output = self._call_actor(tensordict, self.actor_params)
         action_noise = (
             actor_output[self.act_name]
@@ -144,13 +167,12 @@ class MATD3Policy(object):
             .clamp_(-self.noise_clip, self.noise_clip)
         )
         actor_output[self.act_name].add_(action_noise)
-        actor_output["action"].batch_size = tensordict.batch_size
         tensordict.update(actor_output)
         return tensordict
 
     def _call_actor(self, tensordict: TensorDict, params: TensorDict):
         actor_input = tensordict.select(*self.policy_in_keys)
-        actor_input.batch_size = [*actor_input.batch_size, self.agent_spec.n]
+        actor_input.batch_size = [*actor_input.batch_size, self.num_agents]
         actor_output = vmap(self.actor, in_dims=(1, 0), out_dims=1)(actor_input, params)
         return actor_output
 
@@ -172,7 +194,7 @@ class MATD3Policy(object):
                 state   = transition[self.state_name]
                 actions_taken = transition[self.act_name]
 
-                reward  = transition[("next", "reward", f"{self.agent_spec.name}.reward")]
+                reward  = transition[("next", "agents", "reward")]
                 next_dones  = transition[("next", "done")].float().unsqueeze(-1)
                 next_state  = transition[("next", self.state_name)]
 
@@ -216,7 +238,7 @@ class MATD3Policy(object):
                         actions_new = actor_output[self.act_name]
 
                         actor_losses = []
-                        for a in range(self.agent_spec.n):
+                        for a in range(self.num_agents):
                             actions = actions_taken.clone()
                             actions[..., a, :] = actions_new[..., a, :]
                             qs = self.critic(state, actions)
@@ -274,19 +296,29 @@ class Critic(nn.Module):
         ])
 
     def _make_critic(self):
-        if isinstance(self.state_spec, (Bounded, UnboundedTensorSpec)):
+        state_spec = self.state_spec
+        # Extract inner spec if Composite
+        if isinstance(state_spec, Composite):
+            if ("agents", "observation_central") in state_spec.keys(True, True):
+                state_spec = state_spec["agents", "observation_central"]
+            elif ("agents", "observation") in state_spec.keys(True, True):
+                state_spec = state_spec["agents", "observation"]
+            elif "observation" in state_spec.keys():
+                state_spec = state_spec["observation"]
+
+        if isinstance(state_spec, (Bounded, UnboundedTensorSpec)):
             action_dim = self.act_space.shape[-1]
-            state_dim = self.state_spec.shape[-1]
+            state_dim = state_spec.shape[-1]
             num_units = [
                 action_dim * self.num_agents + state_dim,
                 *self.cfg["hidden_units"]
             ]
             base = MLP(num_units)
-        elif isinstance(self.state_spec, Composite):
+        elif isinstance(state_spec, Composite):
             encoder_cls = ENCODERS_MAP[self.cfg.attn_encoder]
-            base = encoder_cls(Composite(self.state_spec))
+            base = encoder_cls(Composite(state_spec))
         else:
-            raise NotImplementedError
+            raise NotImplementedError(state_spec)
 
         v_out = nn.Linear(base.output_shape.numel(), self.num_agents)
         return nn.Sequential(base, v_out)

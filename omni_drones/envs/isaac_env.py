@@ -419,10 +419,25 @@ class IsaacEnv(EnvBase):
                 )
             # obtain the rgb data
             rgb_data = self._rgb_annotator.get_data()
-            # convert to numpy array
-            rgb_data = np.frombuffer(rgb_data, dtype=np.uint8).reshape(*rgb_data.shape)
-            # return the rgb data
-            return rgb_data[:, :, :3]
+            h, w = self.cfg.viewer.resolution[1], self.cfg.viewer.resolution[0]
+            n_pixels = h * w
+            # convert to numpy array and ensure consistent (H, W, 3) output
+            if isinstance(rgb_data, np.ndarray):
+                if rgb_data.size == 0:
+                    return np.zeros((h, w, 3), dtype=np.uint8)
+                if rgb_data.ndim == 1:
+                    nch = max(1, rgb_data.size // n_pixels) if n_pixels > 0 else 4
+                    rgb_data = rgb_data[:n_pixels * nch].reshape(h, w, nch)
+                elif rgb_data.ndim == 2:
+                    rgb_data = rgb_data.reshape(h, w, -1)
+                return np.ascontiguousarray(rgb_data[:, :, :3].copy())
+            else:
+                buf = np.frombuffer(rgb_data, dtype=np.uint8)
+                if buf.size == 0:
+                    return np.zeros((h, w, 3), dtype=np.uint8)
+                nch = max(1, buf.size // n_pixels) if n_pixels > 0 else 4
+                rgb_data = buf[:n_pixels * nch].reshape(h, w, nch)
+                return np.ascontiguousarray(rgb_data[:, :, :3].copy())
         else:
             raise NotImplementedError(
                 f"Render mode '{mode}' is not supported. Please use: {self.metadata['render.modes']}."

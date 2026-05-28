@@ -240,8 +240,9 @@ class TanhIndependentNormalModule(nn.Module):
         else:
             raise ValueError("scale_mapping must be a string or a callable function.")
         self.scale_lb = scale_lb
+        # torchrl 0.12+ uses low/high instead of min/max
         self.dist_cls = functools.partial(
-            TanhNormalWithEntropy, min=min, max=max, event_dims=event_dims
+            TanhNormalWithEntropy, low=min, high=max, event_dims=event_dims
         )
 
     def forward(self, tensor: torch.Tensor) -> Tuple[torch.Tensor]:
