@@ -191,7 +191,7 @@ class IndependentNormalModule(nn.Module):
             self.log_std = nn.Parameter(torch.zeros(output_dim))
         if isinstance(scale_mapping, str):
             self.scale_mapping = _mappings[scale_mapping]
-        elif callable(self.scale_mapping):
+        elif callable(scale_mapping):
             self.scale_mapping = scale_mapping
         else:
             raise ValueError("scale_mapping must be a string or a callable function.")
@@ -235,7 +235,7 @@ class TanhIndependentNormalModule(nn.Module):
             self.log_std = nn.Parameter(torch.zeros(output_dim))
         if isinstance(scale_mapping, str):
             self.scale_mapping = _mappings[scale_mapping]
-        elif callable(self.scale_mapping):
+        elif callable(scale_mapping):
             self.scale_mapping = scale_mapping
         else:
             raise ValueError("scale_mapping must be a string or a callable function.")
@@ -269,7 +269,7 @@ class IndependentBetaModule(nn.Module):
         self.operator = nn.Linear(input_dim, output_dim * 2)
         if isinstance(scale_mapping, str):
             self.scale_mapping = _mappings[scale_mapping]
-        elif callable(self.scale_mapping):
+        elif callable(scale_mapping):
             self.scale_mapping = scale_mapping
         else:
             raise ValueError("scale_mapping must be a string or a callable function.")

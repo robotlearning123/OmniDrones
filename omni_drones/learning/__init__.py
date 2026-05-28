@@ -42,4 +42,5 @@ ALGOS = {
     "ppo_adapt": PPOAdaptivePolicy,
     "sac": SACPolicy,
     "td3": TD3Policy,
+    "matd3": MATD3Policy,
 }

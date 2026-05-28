@@ -237,7 +237,7 @@ class SACPolicy(object):
         state_dict = {
             "actor": self.actor.state_dict(),
             "critic": self.critic.state_dict(),
-            "ctitic_target": self.critic_target.state_dict()
+            "critic_target": self.critic_target.state_dict()
         }
         return state_dict
 

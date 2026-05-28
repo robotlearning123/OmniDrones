@@ -173,8 +173,10 @@ class MATD3Policy(object):
     def _call_actor(self, tensordict: TensorDict, params: TensorDict):
         actor_input = tensordict.select(*self.policy_in_keys)
         actor_input.batch_size = [*actor_input.batch_size, self.num_agents]
-        actor_output = vmap(self.actor, in_dims=(1, 0), out_dims=1)(actor_input, params)
-        return actor_output
+        def _forward(input_td, param_td):
+            with param_td.to_module(self.actor):
+                return self.actor(input_td)
+        return vmap(_forward, in_dims=(1, 0), out_dims=1)(actor_input, params)
 
     def train_op(self, data: TensorDict):
         self.replay_buffer.extend(data.to("cpu").reshape(-1))
@@ -333,7 +335,3 @@ class Critic(nn.Module):
         actions = actions.flatten(1)
         x = torch.cat([state, actions], dim=-1)
         return torch.stack([critic(x) for critic in self.critics], dim=-1)
-
-
-def soft_update_params(target: TensorDict, source: TensorDict, tau: float):
-    ...
